@@ -15,8 +15,8 @@ import config
 mcp = FastMCP("SynaptaHub", host=config.MCP_HOST, port=config.MCP_PORT)
 
 # ── เมนู MCP — เพิ่มฟีเจอร์ = import โมดูลใหม่แล้วเติมชื่อในวง for ─────────────
-from tools import os_exec, web_search, system_info, iot, task, automation
-for mod in (os_exec, web_search, system_info, iot, task, automation):
+from tools import os_exec, web_search, system_info, iot, task, automation, account
+for mod in (os_exec, web_search, system_info, iot, task, automation, account):
     mod.register(mcp)
 
 

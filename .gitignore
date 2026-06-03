@@ -6,3 +6,4 @@ dist/
 build/
 *.spec
 run_hub.bat
+data/

@@ -10,6 +10,6 @@ def register(mcp):
     import agent
 
     @mcp.tool()
-    def run_task(task: str) -> str:
-        """ส่งงานภาษาธรรมชาติให้ Hub ทำบนเครื่อง PC เช่น 'เปิดเพลง lofi', 'ดู disk ที่เหลือ', 'shutdown'. Hub จะคิดเองว่าต้องใช้คำสั่งอะไรแล้วลงมือทำ คืนผลลัพธ์สั้นๆ"""
-        return agent.run(task)
+    def run_task(task: str, user_id: str = "") -> str:
+        """ส่งงานภาษาธรรมชาติให้ Hub ทำบนเครื่องนี้ เช่น 'เปิดเพลง lofi', 'ดู disk ที่เหลือ', 'shutdown'. Hub คิดเองว่าใช้คำสั่งอะไรแล้วลงมือทำ. user_id = รหัสแอปที่ลงทะเบียน (ให้ Hub ดึงข้อมูลของผู้ใช้คนนั้นมาใช้ได้)"""
+        return agent.run(task, user_id=user_id or None)

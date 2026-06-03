@@ -32,6 +32,9 @@ MQTT_BASE    = os.getenv("MQTT_BASE_TOPIC", "").rstrip("/")
 # ── Identity ─────────────────────────────────────────────────────────────────
 AGENT_NAME = os.getenv("AGENT_NAME", "office-pc")
 
+# ── Storage (ข้อมูลต่อ user — เก็บแยกไฟล์ รองรับ multi-user) ──────────────────
+DATA_DIR = os.getenv("DATA_DIR") or str(Path(__file__).resolve().parent / "data")
+
 # ── Misc ─────────────────────────────────────────────────────────────────────
 COMMAND_TIMEOUT = float(os.getenv("COMMAND_TIMEOUT", "60"))
 SERPER_API_KEY  = os.getenv("SERPER_API_KEY", "")

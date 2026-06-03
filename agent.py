@@ -7,6 +7,7 @@ Hub Agent (ReAct) — เดิมคือ runner.py
 stateless ต่อ request: cwd เก็บใน box ที่สร้างใหม่ทุก run() — ไม่มี global state
 """
 
+import json
 import threading
 
 from langchain_openai import ChatOpenAI
@@ -15,6 +16,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
 import config
+import osprofile
 from pathlib import Path
 from tools import os_exec as _os_exec
 from tools import web_search as _web_search
@@ -27,21 +29,15 @@ _SYSTEM = """\
 [หน้าที่หลัก]
 รับคำสั่ง → คิดว่าต้องใช้ tool อะไร → ลงมือทำ → รายงานผลสั้นๆ หนึ่งบรรทัด
 
-[ตัวอย่างวิธีทำงาน]
-- "เปิด YouTube" → os_exec("start https://youtube.com")
-- "เปิดเพลง X" → web_search("X YouTube") → เอา URL ที่ได้ → os_exec("start <url>")
-- "เปิดเพลง X ใน Spotify" → web_search("X Spotify") → os_exec("start <url>")
-- "ดู disk ที่เหลือ" → os_exec("wmic logicaldisk get size,freespace")
-- "shutdown" → os_exec("shutdown /s /t 0")
-- "pause/เล่นเพลง" → os_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]179)"')
-- "เพิ่มเสียง" → os_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]175)"')
+[ตัวอย่างวิธีทำงาน บนเครื่อง {os_type}]
+{examples}
 
 [กฎสำคัญ]
 - เปิดเพลงโดยไม่ระบุ platform → ใช้ YouTube เป็น default เสมอ
 - ค้นหาได้ผลแล้ว ต้องเปิดต่อด้วย os_exec ทันที ห้ามแค่ส่ง URL กลับ
 - ถ้าไม่แน่ใจว่าจะทำอะไร → ถามกลับสั้นๆ เพื่อให้ผู้ใช้ชี้แจง แทนที่จะเดาเอง
 - ตอบจบด้วยหนึ่งบรรทัด บอกว่าทำอะไรและผลลัพธ์คืออะไร ห้ามใช้ markdown
-- คำสั่งที่ต้องการส่ง keyboard shortcut หรือ interact กับ UI ของ app → ใช้ powershell -c "..." ใน os_exec แทน cmd ปกติ เช่น pause เพลง, เพิ่ม/ลดเสียง, กด hotkey ใดๆ
+- ใช้คำสั่งให้ตรงกับระบบ {os_type} เสมอ (อย่าใช้คำสั่งของ OS อื่น)
 
 [ห้ามดำเนินการเด็ดขาด]
 ลบไฟล์ระบบ, ลบข้อมูลจำนวนมาก, ขโมย credential, ส่งข้อมูลออกนอกเครื่อง, ปิดระบบความปลอดภัย
@@ -58,7 +54,7 @@ _model = ChatOpenAI(
 )
 
 
-def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict):
+def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user_id: str | None):
     @tool
     def os_exec(command: str) -> str:
         """Execute a terminal command on this computer. Supports cd — directory persists across calls within this task."""
@@ -74,7 +70,21 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict):
         """Get current machine state: OS, disk and memory usage."""
         return system_info.snapshot_text()
 
-    return [os_exec, web_search, query_system]
+    tools = [os_exec, web_search, query_system]
+
+    # ถ้ารู้ว่าเป็น user ไหน → ให้ดึงข้อมูลของ user (บ้าน/มือถือ ฯลฯ) มาใช้ได้ตอนจำเป็น
+    if user_id:
+        import store
+
+        @tool
+        def user_data(kind: str) -> str:
+            """Read one slice of the requesting user's data: kind = kd (home devices) | scenes | routines | phone | profile. Use only when the task needs it."""
+            data = store.load_part(user_id, kind)
+            return json.dumps(data, ensure_ascii=False) if data is not None else f"(no {kind} data)"
+
+        tools.append(user_data)
+
+    return tools
 
 
 def run(
@@ -83,6 +93,7 @@ def run(
     kill_event: threading.Event | None = None,
     timeout: float | None = None,
     now: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     os_type    = os_type or config.OS_TYPE
     timeout    = timeout if timeout is not None else config.COMMAND_TIMEOUT
@@ -91,8 +102,9 @@ def run(
 
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}   # state ต่อ task เดียว
 
-    system_prompt = _SYSTEM.format(os_type=os_type, now=now) + "\n\n" + system_info.snapshot_text()
-    graph = create_react_agent(_model, _make_tools(kill_event, timeout, cwd_box), prompt=system_prompt)
+    examples = osprofile.profile(os_type)["examples"]
+    system_prompt = _SYSTEM.format(os_type=os_type, now=now, examples=examples) + "\n\n" + system_info.snapshot_text()
+    graph = create_react_agent(_model, _make_tools(kill_event, timeout, cwd_box, user_id), prompt=system_prompt)
 
     final_text = ""
     try:
