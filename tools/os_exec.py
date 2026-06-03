@@ -1,15 +1,16 @@
 """
 OS command execution tool.
 
-Maintains a persistent working directory (_cwd) across calls within the same
-task so the LLM can cd into directories and run subsequent commands there.
+Stateless per-request: ไม่มี global cwd แล้ว — cwd เก็บใน "cwd_box" (dict) ที่ผู้เรียก
+สร้างใหม่ทุกครั้ง. ภายใน task เดียว agent ส่ง box เดิมเข้ามา → cd ค้างได้ในงานนั้น
+แต่ไม่รั่วข้าม request (พร้อมรองรับ multi-user วันหน้าโดยไม่ต้องรื้อ)
 """
 
 import subprocess
 import threading
 from pathlib import Path
 
-_cwd: str = str(Path(__file__).resolve().parent.parent)
+_BASE = str(Path(__file__).resolve().parent.parent)
 _proc: subprocess.Popen | None = None
 _proc_lock = threading.Lock()
 
@@ -18,24 +19,29 @@ def run(
     command: str,
     timeout: float = 60,
     kill_event: threading.Event | None = None,
+    cwd_box: dict | None = None,
 ) -> str:
-    global _cwd, _proc
+    global _proc
+
+    if cwd_box is None:
+        cwd_box = {"cwd": _BASE}      # call เดี่ยว — cwd ใช้ครั้งเดียว ไม่ค้าง
+    cwd = cwd_box.get("cwd", _BASE)
 
     cmd = command.strip()
 
-    # Handle cd separately — subprocess can't persist directory changes
+    # cd จัดการแยก — subprocess ไม่ persist การเปลี่ยน directory
     if cmd.lower() == "cd" or cmd.lower().startswith("cd "):
         target = cmd[2:].strip().strip('"').strip("'")
         if not target or target == "~":
             new_path = Path.home()
         elif target == "..":
-            new_path = Path(_cwd).parent
+            new_path = Path(cwd).parent
         else:
-            new_path = (Path(_cwd) / target).resolve()
+            new_path = (Path(cwd) / target).resolve()
 
         if new_path.is_dir():
-            _cwd = str(new_path)
-            return f"[cwd] {_cwd}"
+            cwd_box["cwd"] = str(new_path)
+            return f"[cwd] {new_path}"
         return f"[error] Directory not found: {target}"
 
     exit_status = "ok"
@@ -44,7 +50,7 @@ def run(
             _proc = subprocess.Popen(
                 cmd,
                 shell=True,
-                cwd=_cwd,
+                cwd=cwd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -72,8 +78,7 @@ def run(
         if _proc.returncode and exit_status == "ok":
             exit_status = "error"
 
-        result = "\n".join(lines) or "(no output)"
-        return result
+        return "\n".join(lines) or "(no output)"
 
     except Exception as e:
         return f"[error] {e}"
@@ -90,8 +95,11 @@ def cancel() -> None:
         p.kill()
 
 
-def reset_cwd() -> None:
-    global _cwd
-    _cwd = str(Path(__file__).resolve().parent.parent)
+# ── MCP tool ─────────────────────────────────────────────────────────────────
+def register(mcp):
+    import config
 
-
+    @mcp.tool()
+    def os_exec(command: str) -> str:
+        """รันคำสั่ง terminal บนเครื่องนี้ (Windows/mac/linux) แล้วคืน output. คำสั่งเดียวจบในตัว ไม่ค้าง directory ข้ามครั้ง"""
+        return run(command, timeout=config.COMMAND_TIMEOUT)

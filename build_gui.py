@@ -12,7 +12,7 @@ from dotenv import dotenv_values
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))   # hub/
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)                  # project root
 ENV_PATH     = os.path.join(SCRIPT_DIR, ".env")
-AGENT_PY     = os.path.join(SCRIPT_DIR, "agent.py")
+AGENT_PY     = os.path.join(SCRIPT_DIR, "main.py")   # entry point (MCP server + discovery)
 DIST_DIR     = os.path.join(SCRIPT_DIR, "dist")
 
 ctk.set_appearance_mode("dark")

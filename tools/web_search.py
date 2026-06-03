@@ -34,3 +34,11 @@ def search(query: str) -> str:
 
     except Exception as e:
         return f"[search error] {e}"
+
+
+# ── MCP tool ─────────────────────────────────────────────────────────────────
+def register(mcp):
+    @mcp.tool()
+    def web_search(query: str) -> str:
+        """ค้นเว็บเพื่อหาข้อมูลที่ต้องใช้ทำงาน เช่น หา URL เพลง/วิดีโอ หรือข้อเท็จจริงล่าสุด"""
+        return search(query)

@@ -1,3 +1,5 @@
+mcp>=1.2.0
+uvicorn>=0.30.0
 langgraph>=0.2.0
 langchain-openai>=0.1.0
 paho-mqtt>=2.0.0

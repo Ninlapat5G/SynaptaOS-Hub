@@ -1,3 +1,2 @@
-# Tool modules for Hub Agent.
-# To add a new tool: create tools/<name>.py and register it in runner.py _make_tools()
-from . import os_exec, web_search
+# Tool modules for the Hub MCP server.
+# เพิ่ม tool ใหม่: สร้าง tools/<name>.py ที่มี register(mcp) แล้วเติมชื่อใน server.py

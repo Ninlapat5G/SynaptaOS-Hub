@@ -1,176 +1,122 @@
 """
-SynaptaOS Hub Agent
-===================
-MQTT 5 agent: receives natural-language tasks, runs a ReAct loop
-(os_exec + web_search), and replies on the request's ResponseTopic.
+Hub Agent (ReAct) — เดิมคือ runner.py
+=====================================
+รับ task ภาษาคน → คิดว่าใช้ tool อะไร → ลงมือทำ → รายงานผลสั้นๆ
+ยืมสมอง gemma ที่ DGX (ผ่าน Tailscale) ตาม config
 
-Topics (built from MQTT_BASE_TOPIC + AGENT_NAME):
-  cmd    : {base}/hub/{AGENT_NAME}/cmd
-  cancel : {base}/hub/{AGENT_NAME}/cancel
-  status : {base}/hub/{AGENT_NAME}/status   (retained online / LWT offline)
-
-Reply protocol (per request, MQTT 5):
-  - reply goes to the request's ResponseTopic, echoing CorrelationData
-  - user property stream_status: ping | chunk | end
-  - ping is a heartbeat that keeps the requester's idle timer alive
-    during long tasks; chunk carries the result; end closes the stream
+stateless ต่อ request: cwd เก็บใน box ที่สร้างใหม่ทุก run() — ไม่มี global state
 """
 
-import os
-import platform
 import threading
+
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
+
+import config
 from pathlib import Path
+from tools import os_exec as _os_exec
+from tools import web_search as _web_search
+from tools import system_info
 
-import paho.mqtt.client as mqtt
-from paho.mqtt.properties import Properties
-from paho.mqtt.packettypes import PacketTypes
-from dotenv import load_dotenv
+_SYSTEM = """\
+คุณคือ agent ที่รันอยู่บนเครื่อง {os_type} มีหน้าที่ลงมือทำงานบนเครื่องนี้ตามที่ได้รับคำสั่ง
+ห้ามแค่รายงานหรืออธิบาย — ต้องใช้ tool เพื่อทำงานจริงเสมอ
 
-import runner
-import kg
-from tools import os_exec
+[หน้าที่หลัก]
+รับคำสั่ง → คิดว่าต้องใช้ tool อะไร → ลงมือทำ → รายงานผลสั้นๆ หนึ่งบรรทัด
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+[ตัวอย่างวิธีทำงาน]
+- "เปิด YouTube" → os_exec("start https://youtube.com")
+- "เปิดเพลง X" → web_search("X YouTube") → เอา URL ที่ได้ → os_exec("start <url>")
+- "เปิดเพลง X ใน Spotify" → web_search("X Spotify") → os_exec("start <url>")
+- "ดู disk ที่เหลือ" → os_exec("wmic logicaldisk get size,freespace")
+- "shutdown" → os_exec("shutdown /s /t 0")
+- "pause/เล่นเพลง" → os_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]179)"')
+- "เพิ่มเสียง" → os_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]175)"')
 
-# ── Config ─────────────────────────────────────────────────────────────────────
+[กฎสำคัญ]
+- เปิดเพลงโดยไม่ระบุ platform → ใช้ YouTube เป็น default เสมอ
+- ค้นหาได้ผลแล้ว ต้องเปิดต่อด้วย os_exec ทันที ห้ามแค่ส่ง URL กลับ
+- ถ้าไม่แน่ใจว่าจะทำอะไร → ถามกลับสั้นๆ เพื่อให้ผู้ใช้ชี้แจง แทนที่จะเดาเอง
+- ตอบจบด้วยหนึ่งบรรทัด บอกว่าทำอะไรและผลลัพธ์คืออะไร ห้ามใช้ markdown
+- คำสั่งที่ต้องการส่ง keyboard shortcut หรือ interact กับ UI ของ app → ใช้ powershell -c "..." ใน os_exec แทน cmd ปกติ เช่น pause เพลง, เพิ่ม/ลดเสียง, กด hotkey ใดๆ
 
-BROKER  = os.getenv("MQTT_BROKER",      "broker.hivemq.com")
-PORT    = int(os.getenv("MQTT_PORT",    "1883"))
-USE_TLS = os.getenv("MQTT_USE_TLS",     "false").lower() == "true"
-BASE    = os.getenv("MQTT_BASE_TOPIC",  "").rstrip("/")
-AGENT   = os.getenv("AGENT_NAME",       "hub-agent")
-TIMEOUT = float(os.getenv("COMMAND_TIMEOUT", "60"))
+[ห้ามดำเนินการเด็ดขาด]
+ลบไฟล์ระบบ, ลบข้อมูลจำนวนมาก, ขโมย credential, ส่งข้อมูลออกนอกเครื่อง, ปิดระบบความปลอดภัย
+→ ตอบปฏิเสธสั้นๆ หนึ่งบรรทัด
 
-_OS_MAP = {"Windows": "windows", "Darwin": "mac", "Linux": "linux"}
-OS_TYPE = os.getenv("OS_TYPE") or _OS_MAP.get(platform.system(), "linux")
+วันเวลาปัจจุบัน: {now}
+"""
 
-HEARTBEAT_SEC = 3
-
-
-def _t(suffix: str) -> str:
-    return f"{BASE}/{suffix}" if BASE else suffix
+_model = ChatOpenAI(
+    model=config.LLM_MODEL,
+    api_key=config.LLM_API_KEY,
+    base_url=config.LLM_BASE_URL,
+    temperature=0,
+)
 
 
-CMD_TOPIC    = _t(f"hub/{AGENT}/cmd")
-CANCEL_TOPIC = _t(f"hub/{AGENT}/cancel")
-STATUS_TOPIC = _t(f"hub/{AGENT}/status")
+def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict):
+    @tool
+    def os_exec(command: str) -> str:
+        """Execute a terminal command on this computer. Supports cd — directory persists across calls within this task."""
+        return _os_exec.run(command, timeout=timeout, kill_event=kill_event, cwd_box=cwd_box)
 
-# ── State ──────────────────────────────────────────────────────────────────────
+    @tool
+    def web_search(query: str) -> str:
+        """Search the web for information needed to complete the task."""
+        return _web_search.search(query)
 
-_client:    mqtt.Client | None = None
-_task_lock  = threading.Lock()
-_kill_event = threading.Event()
+    @tool
+    def query_system() -> str:
+        """Get current machine state: OS, disk and memory usage."""
+        return system_info.snapshot_text()
 
-# ── Reply (MQTT 5) ───────────────────────────────────────────────────────────────
+    return [os_exec, web_search, query_system]
 
-def _reply(stream_status: str, text: str, response_topic: str | None, correlation_data: bytes | None) -> None:
-    if not _client or not response_topic:
-        return
-    props = Properties(PacketTypes.PUBLISH)
-    props.UserProperty = [("stream_status", stream_status)]
-    if correlation_data:
-        props.CorrelationData = correlation_data
-    _client.publish(response_topic, text, qos=1, properties=props)
 
-# ── Task handler ───────────────────────────────────────────────────────────────
+def run(
+    task: str,
+    os_type: str | None = None,
+    kill_event: threading.Event | None = None,
+    timeout: float | None = None,
+    now: str | None = None,
+) -> str:
+    os_type    = os_type or config.OS_TYPE
+    timeout    = timeout if timeout is not None else config.COMMAND_TIMEOUT
+    kill_event = kill_event or threading.Event()
+    now        = now or system_info.now_thai()
 
-def _handle_task(task: str, response_topic: str | None, correlation_data: bytes | None) -> None:
-    if not _task_lock.acquire(blocking=False):
-        _reply("chunk", "[busy] กำลังทำงานอื่นอยู่ — ส่ง cancel เพื่อยกเลิก", response_topic, correlation_data)
-        _reply("end", "", response_topic, correlation_data)
-        return
+    cwd_box = {"cwd": str(Path(__file__).resolve().parent)}   # state ต่อ task เดียว
 
-    _kill_event.clear()
-    print(f"\n[Hub] Task: {task}")
+    system_prompt = _SYSTEM.format(os_type=os_type, now=now) + "\n\n" + system_info.snapshot_text()
+    graph = create_react_agent(_model, _make_tools(kill_event, timeout, cwd_box), prompt=system_prompt)
 
-    # heartbeat — ปิงทุก HEARTBEAT_SEC วิ ให้ตัวจับเวลาฝั่ง requester ไม่หมดระหว่างงานยาว
-    stop_heartbeat = threading.Event()
-
-    def heartbeat() -> None:
-        while not stop_heartbeat.wait(HEARTBEAT_SEC):
-            _reply("ping", "", response_topic, correlation_data)
-
-    if response_topic:
-        threading.Thread(target=heartbeat, daemon=True).start()
-
+    final_text = ""
     try:
-        result = runner.run(task=task, os_type=OS_TYPE, kill_event=_kill_event, timeout=TIMEOUT)
-        _reply("chunk", result, response_topic, correlation_data)
-        _reply("end", "", response_topic, correlation_data)
+        for event in graph.stream(
+            {"messages": [HumanMessage(task)]},
+            config={"recursion_limit": 10},
+            stream_mode="updates",
+        ):
+            if kill_event.is_set():
+                return "[cancelled]"
+            if "tools" in event:
+                for msg in event["tools"]["messages"]:
+                    print(f"      [{msg.name}] → {str(msg.content)[:120]}")
+            if "agent" in event:
+                msg = event["agent"]["messages"][-1]
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        print(f"      call {tc['name']}({tc['args']})")
+                elif msg.content:
+                    final_text = str(msg.content)
+                    print(f"      final → {final_text[:120]}")
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        _reply("chunk", f"[error] {e}", response_topic, correlation_data)
-        _reply("end", "", response_topic, correlation_data)
-    finally:
-        stop_heartbeat.set()
-        _task_lock.release()
+        print(f"      [error] {e}")
+        return f"[error] {e}"
 
-# ── MQTT callbacks ─────────────────────────────────────────────────────────────
-
-def _on_connect(client, userdata, flags, reason_code, properties=None):
-    if reason_code.value != 0:
-        print(f"[Hub] Connect failed: {reason_code}")
-        return
-    client.subscribe(CMD_TOPIC,    qos=1)
-    client.subscribe(CANCEL_TOPIC, qos=1)
-    client.publish(STATUS_TOPIC, "online", qos=1, retain=True)
-    print("[Hub] Connected (MQTT 5)")
-    print(f"      CMD    : {CMD_TOPIC}")
-    print(f"      STATUS : {STATUS_TOPIC}")
-
-
-def _on_message(client, userdata, msg):
-    if msg.topic == CANCEL_TOPIC:
-        print("[Hub] Cancel received")
-        _kill_event.set()
-        os_exec.cancel()
-        return
-
-    task = msg.payload.decode(errors="replace").strip()
-    if not task:
-        return
-
-    props = getattr(msg, "properties", None)
-    response_topic   = getattr(props, "ResponseTopic",   None)
-    correlation_data = getattr(props, "CorrelationData", None)
-
-    threading.Thread(
-        target=_handle_task,
-        args=(task, response_topic, correlation_data),
-        daemon=True,
-    ).start()
-
-
-def _on_disconnect(client, userdata, disconnect_flags, reason_code, properties=None):
-    print(f"[Hub] Disconnected reason={reason_code} — will reconnect…")
-
-# ── Main ───────────────────────────────────────────────────────────────────────
-
-def main():
-    global _client
-    print("SynaptaOS Hub Agent")
-    print(f"  Broker   : {BROKER}:{PORT}{'  [TLS]' if USE_TLS else ''}")
-    print(f"  Protocol : MQTT 5")
-    print()
-    print(kg.snapshot_text())
-    print()
-
-    _client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5)
-    _client.on_connect    = _on_connect
-    _client.on_message    = _on_message
-    _client.on_disconnect = _on_disconnect
-
-    # Last Will — broker จะ publish "offline" ให้อัตโนมัติถ้า hub หลุดกะทันหัน
-    _client.will_set(STATUS_TOPIC, "offline", qos=1, retain=True)
-
-    if USE_TLS:
-        import ssl
-        _client.tls_set(cert_reqs=ssl.CERT_NONE)
-
-    _client.connect(BROKER, PORT, keepalive=60, properties=Properties(PacketTypes.CONNECT))
-    _client.loop_forever()
-
-
-if __name__ == "__main__":
-    main()
+    return final_text or "[no response]"
