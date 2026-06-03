@@ -219,6 +219,29 @@ H0–H3 = รากฐานใช้งานได้จริง · H4+ แ�
 
 ---
 
+## 8.5 อัปเดตสถาปัตยกรรม (2026-06-04) — pairing + per-user storage + multi-hub
+
+หลังทำ H0–H5 / A1–A3 เสร็จ ปรับดีไซน์ให้รองรับ production หลาย Hub + multi-user:
+
+- **รหัสย้ายไปตอนจับคู่ (ไม่อยู่หน้าตั้งค่า):** Hub broadcast แค่ ชื่อ+IP+port ผ่าน MQTT. App เห็น Hub ใหม่ → กดจับคู่ → กรอกรหัส → `register(user_id, app_name)` ผ่าน Tailscale (รหัสผิด = guard ตอบ 401). สำเร็จแล้ว Hub จดแอป, App เก็บ endpoint+token+tools ราย Hub
+- **ต่อได้หลาย Hub:** App เก็บ paired hubs เป็น list (`HubController`). ทุกครั้งที่ต่อ/กลับมาออนไลน์ → ดึง `tools/list` มาอัปเดต (= A4 ทำแล้ว)
+- **agent เลือก Hub (`hub_agent.pickHub`):** ดู tool ของทุก Hub ที่จับคู่ → ตัดสินว่าคำสั่ง user ส่งไป Hub ไหน สั่งอะไร
+- **เก็บข้อมูลฝั่ง Hub แบบเป็นระเบียบ แยกไฟล์ แยก user (รองรับ multi-user):**
+  ```
+  data/registry.json
+  data/users/<user_id>/{profile,kd,scenes,routines,phone}.json
+  ```
+  agent อ่านเฉพาะไฟล์ที่ต้องใช้ (`get_user_data`/`load_part`) — ไม่เปลือง context. App `sync_data` ส่งเฉพาะส่วนที่เปลี่ยน (debounce), full sync ตอนจับคู่
+- **Python พกพา:** `osprofile.py` แยกคำสั่งตาม OS (windows/linux/mac, unknown→linux) — production ชุดแรกรันบน **Raspberry Pi 5**
+
+### TODO อนาคต — ตั้งค่า Hub ผ่าน GUI บน web app
+ต่อไป Hub จะมี **หน้าเว็บ (web app GUI)** สำหรับตั้งค่าระบบ:
+- คุยกับ **agent ของระบบโดยตรงผ่านเว็บ** (ไม่ต้องผ่านมือถือ)
+- **อ่าน + แก้ไขข้อมูล** (registry, ข้อมูลแต่ละ user: kd/scenes/routines/phone/profile) ได้จากหน้าเว็บนั้นเลย
+- เหมาะกับตอนตั้ง Hub ครั้งแรกบน RPi / ดูแลหลาย user — โครง store.py แยกไฟล์ต่อ user รองรับอยู่แล้ว
+
+---
+
 ## 9. ข้อกำหนดการสื่อสาร (สรุป)
 
 - App↔Hub = HTTPS/MCP ผ่าน Tailscale IP เท่านั้น (ไม่เปิด public)
