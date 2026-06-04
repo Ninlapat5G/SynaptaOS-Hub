@@ -35,6 +35,7 @@ _SYSTEM = """\
 [กฎสำคัญ]
 - เปิดเพลงโดยไม่ระบุ platform → ใช้ YouTube เป็น default เสมอ
 - ค้นหาได้ผลแล้ว ต้องเปิดต่อด้วย os_exec ทันที ห้ามแค่ส่ง URL กลับ
+- ถ้าต้องการคุยหรือสั่งการแอปมือถือของผู้ใช้ (เช่น "บอกจิมว่า...", "สั่งให้แอปของสมใจ...") → ใช้ send_command_to_user_app เพื่อวิเคราะห์ชื่อและส่งคำสั่งทันที
 - ถ้าไม่แน่ใจว่าจะทำอะไร → ถามกลับสั้นๆ เพื่อให้ผู้ใช้ชี้แจง แทนที่จะเดาเอง
 - ตอบจบด้วยหนึ่งบรรทัด บอกว่าทำอะไรและผลลัพธ์คืออะไร ห้ามใช้ markdown
 - ใช้คำสั่งให้ตรงกับระบบ {os_type} เสมอ (อย่าใช้คำสั่งของ OS อื่น)
@@ -70,7 +71,26 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         """Get current machine state: OS, disk and memory usage."""
         return system_info.snapshot_text()
 
-    tools = [os_exec, web_search, query_system]
+    @tool
+    def send_command_to_user_app(user_query: str, command: str, command_type: str) -> str:
+        """ส่งคำสั่งหรือข้อความแชทไปยังแอปมือถือของผู้ใช้ผ่าน MQTT โดยวิเคราะห์ค้นหาจากข้อมูลโปรไฟล์ (ไม่ใช่ user_id ตรงๆ)
+        - user_query: ชื่อจริง ชื่อเล่น หรือข้อมูลใน bio เพื่อค้นหาผู้ใช้ที่ต้องการ (เช่น 'จิม', 'สมใจ')
+        - command: ข้อความที่จะคุย หรือคำสั่งสั่งงาน (เช่น 'เปิดแอร์ห้องนอน', 'สวัสดีครับสบายดีไหม')
+        - command_type: 'chat' (สำหรับส่งข้อความคุยในแชทให้แอปตอบ) หรือ 'action' (ส่งคำสั่งเพื่อให้แอปทำงานเงียบๆ เบื้องหลัง)
+        """
+        import store
+        from tools import account
+        uid = account.find_user_by_query(user_query)
+        if not uid:
+            return f"ไม่พบผู้ใช้ที่ตรงกับคำค้นหา: '{user_query}'"
+        
+        prof = store.load_part(uid, "profile") or {}
+        display_name = prof.get("displayName") or prof.get("app_name") or uid
+        
+        res = account.send_mqtt_app_command(uid, command, command_type)
+        return f"พบผู้ใช้ '{display_name}' (ID: {uid}): {res}"
+
+    tools = [os_exec, web_search, query_system, send_command_to_user_app]
 
     # ถ้ารู้ว่าเป็น user ไหน → ให้ดึงข้อมูลของ user (บ้าน/มือถือ ฯลฯ) มาใช้ได้ตอนจำเป็น
     if user_id:
