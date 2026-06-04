@@ -56,6 +56,14 @@ def _live_resources() -> dict[str, Any]:
 
 def snapshot_text() -> str:
     res = _live_resources()
+    try:
+        from discovery import tailscale_ip
+        import config
+        ip = tailscale_ip()
+        admin_url = f"http://{ip}:{config.MCP_PORT}/admin"
+    except Exception:
+        admin_url = "unknown"
+        
     lines = [
         '[SYSTEM INFO — สถานะเครื่อง]',
         '',
@@ -64,7 +72,8 @@ def snapshot_text() -> str:
         f'  ├─ os:       {_OS_FULL}',
         f'  ├─ cpu:      {_CPU} — {_CORES} cores{_FREQ_STR}  ({res["cpu_percent"]:.0f}% busy)',
         f'  ├─ ram:      {res["ram_free_gb"]} GB free / {res["ram_total_gb"]} GB total',
-        f'  └─ disk:     {res["disk_free_gb"]} GB free / {res["disk_total_gb"]} GB total',
+        f'  ├─ disk:     {res["disk_free_gb"]} GB free / {res["disk_total_gb"]} GB total',
+        f'  └─ admin_url: {admin_url}',
         '',
         f'Base dir: {_BASE}',
     ]

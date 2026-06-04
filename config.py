@@ -20,8 +20,19 @@ LLM_API_KEY  = os.getenv("LLM_API_KEY",  "ollama")  # Ollama ไม่เช็�
 # ── MCP server (หน้าบ้านใหม่ — App ต่อผ่าน Tailscale IP) ──────────────────────
 MCP_HOST  = os.getenv("MCP_HOST", "0.0.0.0")   # bind ทุก interface → เข้าถึงผ่าน IP 100.x ของ Tailscale ได้
 MCP_PORT  = int(os.getenv("MCP_PORT", "8765"))
-MCP_TOKEN = os.getenv("MCP_TOKEN", "")          # ว่าง = ไม่เช็ค token (เชื่อ Tailscale ACL อย่างเดียว)
 MCP_PATH  = os.getenv("MCP_PATH", "/mcp")
+
+_ENV_FILE = Path(__file__).resolve().parent / ".env"
+
+def get_admin_token() -> str:
+    """ดึงรหัสผ่านผู้ดูแลระบบล่าสุดจากไฟล์ .env โดยตรงเพื่อรองรับการเปลี่ยนแปลงโดยไม่ต้องเริ่มระบบใหม่"""
+    load_dotenv(_ENV_FILE, override=True)
+    return os.getenv("ADMIN_TOKEN", "")
+
+def get_mcp_token() -> str:
+    """ดึงรหัสผ่านแอปมือถือล่าสุดจากไฟล์ .env โดยตรง"""
+    load_dotenv(_ENV_FILE, override=True)
+    return os.getenv("MCP_TOKEN", "")
 
 # ── MQTT (App↔Node + Hub broadcast discovery) — แยกขาดจาก Tailscale ──────────
 MQTT_BROKER  = os.getenv("MQTT_BROKER", "broker.hivemq.com")

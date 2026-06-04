@@ -22,26 +22,32 @@ for mod in (os_exec, web_search, system_info, iot, task, automation, account):
 
 # ── Token guard ──────────────────────────────────────────────────────────────
 class TokenGuard(BaseHTTPMiddleware):
-    """ตรวจ token ใน header ถ้า config.MCP_TOKEN ถูกตั้งไว้ — ไม่ตั้ง = ปล่อยผ่าน"""
+    """ตรวจ token ใน header ถ้า config.MCP_TOKEN ถูกตั้งไว้ — ไม่ตั้ง = ปล่อยผ่าน (เช็คเฉพาะ path /mcp)"""
 
     async def dispatch(self, request, call_next):
-        if config.MCP_TOKEN:
+        mcp_token = config.get_mcp_token()
+        if mcp_token and request.url.path.startswith("/mcp"):
             auth = request.headers.get("authorization", "")
             token = auth[7:] if auth[:7].lower() == "bearer " else request.headers.get("x-synapta-token", "")
-            if token != config.MCP_TOKEN:
+            if token != mcp_token:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
         return await call_next(request)
 
 
 def build_app():
-    """คืน Starlette app ของ streamable-http พร้อม token guard ครอบ"""
+    """คืน Starlette app ของ streamable-http พร้อม token guard ครอบ และเพิ่มหน้าเว็บควบคุม"""
     app = mcp.streamable_http_app()
     app.add_middleware(TokenGuard)
+    import webadmin
+    webadmin.mount(app, mcp)
     return app
 
 
 def run():
     import uvicorn
+    from discovery import tailscale_ip
+    ip = tailscale_ip()
     print(f"[Hub] MCP server → http://{config.MCP_HOST}:{config.MCP_PORT}{config.MCP_PATH}")
-    print(f"[Hub] token guard: {'ON' if config.MCP_TOKEN else 'OFF (Tailscale ACL only)'}")
+    print(f"[Hub] Admin panel available at: http://{ip}:{config.MCP_PORT}/admin")
+    print(f"[Hub] token guard: {'ON' if config.get_mcp_token() else 'OFF (Tailscale ACL only)'}")
     uvicorn.run(build_app(), host=config.MCP_HOST, port=config.MCP_PORT, log_level="info")

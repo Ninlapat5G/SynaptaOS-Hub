@@ -26,6 +26,19 @@ PARTS = ("profile", "kd", "scenes", "routines", "phone")
 _BASE = Path(config.DATA_DIR)
 _REGISTRY = _BASE / "registry.json"
 _lock = threading.Lock()
+_listeners = []
+
+
+def add_listener(callback) -> None:
+    _listeners.append(callback)
+
+
+def _notify(user_id: str, kind: str, data) -> None:
+    for cb in _listeners:
+        try:
+            cb(user_id, kind, data)
+        except Exception:
+            pass
 
 
 def _safe(user_id: str) -> str:
@@ -74,6 +87,7 @@ def register_user(user_id: str, app_name: str, profile: dict | None = None) -> d
             prof["registered_at"] = int(time.time())
         _write_json(d / "profile.json", prof)
         _update_registry(user_id, app_name=app_name)
+        _notify(user_id, "profile", prof)
         return {"user_id": _safe(user_id), "new": first_time, "app_name": app_name}
 
 
@@ -88,6 +102,7 @@ def save_part(user_id: str, kind: str, data) -> None:
     with _lock:
         _write_json(_user_dir(user_id) / f"{kind}.json", data)
         _update_registry(user_id)
+        _notify(user_id, kind, data)
 
 
 def load_part(user_id: str, kind: str):

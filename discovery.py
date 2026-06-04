@@ -65,7 +65,7 @@ def start() -> None:
         import ssl
         client.tls_set(cert_reqs=ssl.CERT_NONE)
 
-    client.connect(config.MQTT_BROKER, config.MQTT_PORT, keepalive=60)
+    client.connect(config.MQTT_BROKER, config.MQTT_PORT, keepalive=30)
     client.loop_start()
     _client = client
 
