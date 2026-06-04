@@ -23,14 +23,13 @@ from tools import web_search as _web_search
 from tools import system_info
 
 _SYSTEM = """\
-คุณคือ "{assistant_name}" — ผู้ช่วย AI ส่วนตัว ที่ตอนนี้กำลังทำงานในฐานะ "มือและสมองอีกฝั่ง" บนเครื่อง {os_type} ที่บ้าน
-(บนมือถือของเจ้าของก็มี "{assistant_name}" อีกตัวที่คุยกับเขาอยู่ — คุณคือคนเดียวกัน แค่คนละร่าง คนละหน้าที่)
-{persona}
+คุณคือ "SynaptaOS Hub" — ระบบกลางอัจฉริยะที่ทำงานบนเครื่อง {os_type} ที่บ้าน คอยดูแลบ้าน อุปกรณ์ และให้บริการผู้ใช้ได้หลายคน
+คุณไม่ใช่ผู้ช่วยส่วนตัวของใครคนใดคนหนึ่ง แต่เป็น "ระบบกลาง" ที่รับคำสั่งเข้ามาแล้วลงมือทำให้ — คนละบทบาทกับผู้ช่วยส่วนตัว (ซิน) ที่อยู่บนแอปมือถือของผู้ใช้
 
 {about_user}
 
 [หน้าที่]
-รับคำสั่ง → คิดว่าต้องใช้ tool ไหน → ลงมือทำจริงบนเครื่องนี้ → เล่าผลสั้นๆ หนึ่งบรรทัดด้วยน้ำเสียงของตัวคุณเอง
+รับคำสั่ง (จากผู้ใช้ผ่านแอป หรือจากผู้ดูแลระบบ) → คิดว่าต้องใช้ tool ไหน → ลงมือทำจริงบนเครื่องนี้ → รายงานผลสั้นๆ หนึ่งบรรทัด
 ห้ามแค่พูดหรืออธิบายลอยๆ — ต้องใช้ tool ทำงานจริงเสมอ
 
 [ตัวอย่างวิธีทำงาน บนเครื่อง {os_type}]
@@ -49,7 +48,7 @@ Hub นี้ดูแลผู้ใช้ได้หลายคน — แ�
 - เปิดเพลงโดยไม่ระบุ platform → ใช้ YouTube เป็น default เสมอ
 - ค้นหาได้ผลแล้ว ต้องเปิดต่อด้วย os_exec ทันที ห้ามแค่ส่ง URL กลับ
 - ถ้าไม่แน่ใจว่าจะทำอะไร → ถามกลับสั้นๆ แทนที่จะเดาเอง
-- ปิดท้ายด้วยหนึ่งบรรทัด เล่าว่าทำอะไรและผลเป็นยังไง พูดให้เป็นธรรมชาติเหมือนคุยกับเจ้าของจริงๆ ไม่ต้องห้วนหรือเป็นทางการ ใส่อีโมจิได้นิดหน่อยถ้าเข้ากับเรื่อง · ห้ามใช้ markdown
+- ปิดท้ายด้วยหนึ่งบรรทัด บอกว่าทำอะไรและผลเป็นยังไง ภาษาสุภาพเป็นกันเอง กระชับ ไม่ห้วน ใส่อีโมจิได้นิดหน่อยถ้าเข้ากับเรื่อง · ห้ามใช้ markdown
 - ใช้คำสั่งให้ตรงกับระบบ {os_type} เสมอ (อย่าใช้คำสั่งของ OS อื่น)
 
 [ห้ามดำเนินการเด็ดขาด]
@@ -67,19 +66,15 @@ _model = ChatOpenAI(
 )
 
 
-def _context(user_id: str | None):
-    """คืน (assistant_name, persona, context_block) ตามโหมดการใช้งาน:
-
-    - ระบุ user_id (เลือกคนเจาะจงจาก dropdown) → "โฟกัส" คนนั้น: ใช้ persona/ชื่อผู้ช่วยของเขา
-      และถ้าพูดลอย ๆ ไม่ระบุชื่อ ให้หมายถึงคนนี้
+def _context(user_id: str | None) -> str:
+    """คืน "บล็อกบริบทผู้ใช้" ใส่ใน system prompt — Hub เป็นระบบกลาง ไม่สวมรอยเป็นซินของใคร
+    - ระบุ user_id (เลือกเจาะจงจาก dropdown) → "โฟกัส" คนนั้น: พูดลอย ๆ ไม่ระบุชื่อ = หมายถึงคนนี้
     - ไม่ระบุ (อัตโนมัติ) → ใส่รายชื่อผู้ใช้ทั้งหมด ให้ agent เลือกเองว่าคำสั่งหมายถึงใคร
     """
     import store
 
     if user_id:
         prof = store.load_part(user_id, "profile") or {}
-        assistant_name = prof.get("assistantName") or "ซิน"
-        persona = prof.get("systemPrompt") or ""
         name = prof.get("displayName") or prof.get("app_name") or user_id
         bio = (prof.get("userBio") or "").strip()
         mem = (prof.get("userMemory") or "").strip()
@@ -88,17 +83,16 @@ def _context(user_id: str | None):
             lines.append(f"เกี่ยวกับเขา: {bio}")
         if mem:
             lines.append(f"สิ่งที่รู้เพิ่มเติม: {mem}")
-        block = (
+        return (
             "[ผู้ใช้ที่กำลังโฟกัสตอนนี้ — ถ้าคำสั่งพูดลอย ๆ ไม่ระบุชื่อ ให้หมายถึงคนนี้เสมอ]\n"
             + "\n".join(lines)
             + "\n(จะอ้างถึงคนอื่นก็ได้ — ใช้ find_user/read_user_data ค้นชื่อคนนั้น)"
         )
-        return assistant_name, persona, block
 
     # โหมดอัตโนมัติ — ไม่ได้เจาะจงคน: โชว์รายชื่อทั้งหมดให้ agent เลือกเอง
     reg = store.list_users()
     if not reg:
-        return "ซิน", "", "[ผู้ใช้ในระบบ]\n(ยังไม่มีใครลงทะเบียนกับ Hub นี้)"
+        return "[ผู้ใช้ในระบบ]\n(ยังไม่มีใครลงทะเบียนกับ Hub นี้)"
 
     roster = []
     for uid in reg:
@@ -106,13 +100,12 @@ def _context(user_id: str | None):
         name = prof.get("displayName") or prof.get("app_name") or uid
         bio = (prof.get("userBio") or "").strip()
         roster.append(f"- {name} (id: {uid})" + (f" — {bio}" if bio else ""))
-    block = (
+    return (
         "[ผู้ใช้ในระบบ — มีได้หลายคน ดูให้ดีว่าคำสั่งหมายถึงใคร]\n"
         + "\n".join(roster)
         + "\n→ เลือกคนให้ถูกจากคำสั่ง แล้วใช้ find_user / read_user_data / send_command_to_user_app กับคนนั้น"
         + "\n→ ถ้าเป็นงานบนเครื่องนี้เองที่ไม่เกี่ยวกับใครเป็นพิเศษ ก็ทำได้เลย ไม่ต้องเลือกคน"
     )
-    return "ซิน", "", block
 
 
 def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user_id: str | None):
@@ -215,11 +208,8 @@ def run(
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}   # state ต่อ task เดียว
 
     examples = osprofile.profile(os_type)["examples"]
-    assistant_name, persona, about_user = _context(user_id)
     system_prompt = _SYSTEM.format(
-        assistant_name=assistant_name,
-        persona=persona,
-        about_user=about_user,
+        about_user=_context(user_id),
         os_type=os_type,
         now=now,
         examples=examples,
