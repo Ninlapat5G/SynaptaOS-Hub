@@ -27,10 +27,7 @@ const DOM = {
     currentUserTitle: document.getElementById("current-user-title"),
     currentUserSubtitle: document.getElementById("current-user-subtitle"),
     partBtns: document.querySelectorAll(".part-tab-btn"),
-    jsonEditor: document.getElementById("json-editor"),
-    jsonValidity: document.getElementById("json-validity"),
-    btnSavePart: document.getElementById("btn-save-part"),
-    saveStatus: document.getElementById("save-status"),
+    uiViewPanel: document.getElementById("ui-view-panel"),
     editorFilenameLabel: document.getElementById("editor-filename-label"),
     btnRefreshUsers: document.getElementById("btn-refresh-users"),
 
@@ -255,84 +252,202 @@ function selectPart(part) {
         }
     });
 
-    DOM.editorFilenameLabel.innerText = `${part}.json`;
+    const labels = {
+        profile: "ข้อมูลส่วนตัว (Profile)",
+        kd: "รายการอุปกรณ์ควบคุม (Devices)",
+        scenes: "สภาพแวดล้อมที่ตั้งไว้ (Scenes)",
+        routines: "กฎอัตโนมัติ (Routines)",
+        phone: "สถานะโทรศัพท์มือถือ (Phone)"
+    };
+    DOM.editorFilenameLabel.innerText = labels[part] || part;
     loadUserPart();
 }
 
 async function loadUserPart() {
     if (!state.currentUser) return;
-    DOM.jsonEditor.value = "กำลังดึงข้อมูลข้อมูลส่วนตัว...";
-    DOM.jsonEditor.disabled = true;
+    DOM.uiViewPanel.innerHTML = '<div class="loading-spinner">กำลังดึงข้อมูล...</div>';
     
     try {
         const data = await fetchAPI(`/admin/api/users/${state.currentUser}/${state.currentPart}`);
-        DOM.jsonEditor.disabled = false;
-        if (data === null) {
-            DOM.jsonEditor.value = "{}";
+        renderPartUI(state.currentPart, data);
+    } catch (err) {
+        if (err.message !== "unauthorized") {
+            DOM.uiViewPanel.innerHTML = `<div class="loading-spinner" style="color:var(--danger-color)">เกิดข้อผิดพลาดในการโหลดข้อมูล: ${err.message}</div>`;
+        }
+    }
+}
+
+function renderPartUI(part, data) {
+    if (!data) {
+        DOM.uiViewPanel.innerHTML = '<div class="loading-spinner">ไม่มีข้อมูลสำหรับส่วนนี้</div>';
+        return;
+    }
+
+    let html = "";
+    if (part === "profile") {
+        const displayName = data.displayName || "(ยังไม่ได้ซิงก์ / ไม่มีชื่อ)";
+        const assistantName = data.assistantName || "(ยังไม่ได้ซิงก์ / ไม่มีชื่อ)";
+        const userBio = data.userBio || "(ไม่มีข้อมูล)";
+        const userMemory = data.userMemory || "(ไม่มีข้อมูล)";
+        const systemPrompt = data.systemPrompt || "(ไม่มีข้อมูล)";
+        const registeredAt = data.registered_at ? new Date(data.registered_at * 1000).toLocaleString("th-TH") : "ไม่ทราบ";
+
+        html = `
+            <div class="profile-card">
+                <div class="profile-field">
+                    <div class="profile-label">ชื่อผู้ใช้งาน (Display Name)</div>
+                    <div class="profile-value">${displayName}</div>
+                </div>
+                <div class="profile-field">
+                    <div class="profile-label">ชื่อบอทผู้ช่วย (Assistant Name)</div>
+                    <div class="profile-value">${assistantName}</div>
+                </div>
+                <div class="profile-field">
+                    <div class="profile-label">ข้อมูลเกี่ยวกับผู้ใช้ (Bio)</div>
+                    <div class="profile-value">${userBio}</div>
+                </div>
+                <div class="profile-field">
+                    <div class="profile-label">ความจำระยะยาวของบอท (Long-term Memory)</div>
+                    <div class="profile-value">${userMemory}</div>
+                </div>
+                <div class="profile-field">
+                    <div class="profile-label">System Prompt ของบอทส่วนบุคคล</div>
+                    <div class="profile-value" style="font-family: monospace; font-size: 13.5px;">${systemPrompt}</div>
+                </div>
+                <div class="profile-field">
+                    <div class="profile-label">ลงทะเบียนเมื่อ (Registered At)</div>
+                    <div class="profile-value">${registeredAt}</div>
+                </div>
+            </div>
+        `;
+    } else if (part === "kd") {
+        if (!Array.isArray(data) || data.length === 0) {
+            html = '<div class="loading-spinner">ไม่มีรายการอุปกรณ์ควบคุม</div>';
         } else {
-            DOM.jsonEditor.value = JSON.stringify(data, null, 2);
+            html = '<div class="device-grid">';
+            data.forEach(dev => {
+                let iconClass = "🔌";
+                if (dev.icon === "lamp") iconClass = "💡";
+                else if (dev.icon === "sparkle") iconClass = "✨";
+                else if (dev.icon === "gauge") iconClass = "📊";
+                else if (dev.icon === "bulb") iconClass = "💡";
+
+                html += `
+                    <div class="device-card-ui">
+                        <div class="device-icon-wrapper">${iconClass}</div>
+                        <div class="device-info-wrapper">
+                            <div class="device-name-ui" title="${dev.name}">${dev.name}</div>
+                            <div class="device-room-ui">${dev.room}</div>
+                            <div class="device-badge-ui">${dev.type}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
         }
-        validateJSON();
-    } catch (err) {
-        if (err.message !== "unauthorized") {
-            DOM.jsonEditor.value = `เกิดข้อผิดพลาดในการโหลดข้อมูล: ${err.message}`;
-            DOM.jsonEditor.disabled = true;
+    } else if (part === "scenes") {
+        if (!Array.isArray(data) || data.length === 0) {
+            html = '<div class="loading-spinner">ไม่มีรายการสภาพแวดล้อม (Scenes)</div>';
+        } else {
+            html = '<div class="scene-list-ui">';
+            data.forEach(sc => {
+                const actionsHtml = Array.isArray(sc.actions) && sc.actions.length > 0
+                    ? sc.actions.map(act => `
+                        <div class="scene-action-item">
+                            <span class="action-device">${act.deviceId}</span>
+                            <span class="action-val">${act.value}</span>
+                        </div>
+                    `).join('')
+                    : '<div style="color:var(--text-secondary); font-size: 12px;">(ไม่มีคำสั่งทำงานในซีนนี้)</div>';
+
+                html += `
+                    <div class="scene-card-ui">
+                        <div class="scene-header-ui">
+                            <div class="scene-title-ui">✨ ${sc.name}</div>
+                            <span class="badge">${sc.id}</span>
+                        </div>
+                        <div class="scene-actions-ui">
+                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--accent-primary); margin-bottom: 6px;">คำสั่งอุปกรณ์:</div>
+                            ${actionsHtml}
+                        </div>
+                        ${sc.prompt ? `
+                        <div style="font-size: 12px; margin-top: 4px;">
+                            <span style="color: var(--accent-secondary); font-weight: 600;">Prompt สั่งการ:</span> ${sc.prompt}
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            html += '</div>';
         }
-    }
-}
+    } else if (part === "routines") {
+        if (!Array.isArray(data) || data.length === 0) {
+            html = '<div class="loading-spinner">ไม่มีกฎการทำงานอัตโนมัติ (Routines)</div>';
+        } else {
+            html = '<div class="routine-list-ui">';
+            data.forEach(rt => {
+                const statusBadge = rt.enabled 
+                    ? '<span class="badge" style="color:var(--success-color); border-color:var(--success-color); background:rgba(0,230,118,0.1)">เปิดใช้งาน</span>'
+                    : '<span class="badge" style="color:var(--text-secondary); border-color:var(--text-secondary); background:rgba(255,255,255,0.05)">ปิดใช้งาน</span>';
 
-// ตรวจจับความถูกต้องของรูปแบบ JSON ระหว่างพิมพ์
-DOM.jsonEditor.addEventListener("input", validateJSON);
+                const condsHtml = Array.isArray(rt.conditions) && rt.conditions.length > 0
+                    ? rt.conditions.map(cond => `
+                        <div class="routine-cond-item">
+                            <span class="cond-source">${cond.source}</span>
+                            <span class="cond-val">${cond.op} ${cond.value}</span>
+                        </div>
+                    `).join('')
+                    : '<div style="color:var(--text-secondary); font-size: 12px;">(ไม่มีเงื่อนไข)</div>';
 
-function validateJSON() {
-    const rawVal = DOM.jsonEditor.value;
-    try {
-        JSON.parse(rawVal);
-        DOM.jsonValidity.innerText = "✓ รูปแบบ JSON ถูกต้อง";
-        DOM.jsonValidity.className = "validation-status status-valid";
-        DOM.btnSavePart.disabled = false;
-        return true;
-    } catch (e) {
-        DOM.jsonValidity.innerText = `✗ รูปแบบ JSON ไม่ถูกต้อง: ${e.message.split("in JSON")[0]}`;
-        DOM.jsonValidity.className = "validation-status status-invalid";
-        DOM.btnSavePart.disabled = true;
-        return false;
-    }
-}
+                const actsHtml = Array.isArray(rt.actions) && rt.actions.length > 0
+                    ? rt.actions.map(act => {
+                        if (act.type === "prompt") {
+                            return `<div style="font-size: 13px; color: var(--text-primary); margin-bottom: 4px;">💬 รัน Prompt: "${act.prompt}"</div>`;
+                        } else if (act.type === "scene") {
+                            return `<div style="font-size: 13px; color: var(--text-primary); margin-bottom: 4px;">🎬 เรียกซีรี่/ซีน: ID ${act.sceneId}</div>`;
+                        }
+                        return `<div style="font-size: 13px; color: var(--text-primary); margin-bottom: 4px;">⚙️ ปรับค่าอุปกรณ์</div>`;
+                    }).join('')
+                    : '<div style="color:var(--text-secondary); font-size: 12px;">(ไม่มีผลลัพธ์การทำงาน)</div>';
 
-DOM.btnSavePart.addEventListener("click", async () => {
-    if (!state.currentUser || !validateJSON()) return;
-    
-    DOM.btnSavePart.disabled = true;
-    showSaveStatus("กำลังประมวลผล...", "var(--text-secondary)");
-    
-    try {
-        const body = JSON.parse(DOM.jsonEditor.value);
-        await fetchAPI(`/admin/api/users/${state.currentUser}/${state.currentPart}`, {
-            method: "PUT",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(body)
-        });
-        showSaveStatus("✓ บันทึกข้อมูลสำเร็จแล้ว!", "var(--success-color)");
-        loadUsers(); // รีเฟรชข้อมูลเวลาอัปเดตผู้ใช้ล่าสุด
-    } catch (err) {
-        if (err.message !== "unauthorized") {
-            showSaveStatus(`✗ บันทึกล้มเหลว: ${err.message}`, "var(--danger-color)");
+                html += `
+                    <div class="routine-card-ui">
+                        <div class="routine-header-ui">
+                            <div class="routine-title-ui">🤖 ${rt.name}</div>
+                            ${statusBadge}
+                        </div>
+                        <div class="routine-actions-ui">
+                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--accent-primary); margin-bottom: 6px;">เมื่อตรงเงื่อนไข (${rt.logic || "AND"}):</div>
+                            ${condsHtml}
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); border-radius: 8px; padding: 12px;">
+                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--accent-secondary); margin-bottom: 6px;">ระบบจะทำงานดังนี้:</div>
+                            ${actsHtml}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
         }
-    } finally {
-        DOM.btnSavePart.disabled = false;
-    }
-});
+    } else if (part === "phone") {
+        const batteryPercent = data.level !== undefined ? data.level : 0;
+        const chargingText = data.charging ? "กำลังชาร์จไฟ ⚡" : "ไม่ได้ชาร์จไฟ";
+        const text = data.text || `แบตเตอรี่: ${batteryPercent}%`;
 
-function showSaveStatus(text, color) {
-    DOM.saveStatus.innerText = text;
-    DOM.saveStatus.style.color = color;
-    DOM.saveStatus.style.opacity = 1;
-    setTimeout(() => {
-        DOM.saveStatus.style.opacity = 0;
-    }, 4000);
+        html = `
+            <div class="phone-card-ui">
+                <div class="phone-battery-radial" style="--battery-percent: ${batteryPercent}">
+                    <span class="phone-battery-text">${batteryPercent}%</span>
+                </div>
+                <div class="phone-details-ui">
+                    <div class="phone-status-lbl">${text}</div>
+                    <div class="phone-status-sub">สถานะพลังงาน: ${chargingText}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    DOM.uiViewPanel.innerHTML = html;
 }
 
 // ── แท็บที่ 2: การพูดคุยกับเอเจนต์ (Agent Tab) ───────────────────────────────
