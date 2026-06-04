@@ -401,11 +401,12 @@ function AgentTab({ users }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
         <h2 className="font-semibold">สั่งการเอเจนต์ (Agent Shell)</h2>
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-inkDim whitespace-nowrap">บริบทผู้ใช้:</span>
+          <span className="text-inkDim whitespace-nowrap">โฟกัสที่ผู้ใช้:</span>
           <select value={ctxUser} onChange={(e) => setCtxUser(e.target.value)}
-            className="bg-bg1/70 border border-line rounded-lg px-2 py-1.5 outline-none focus:border-accent max-w-[60vw] sm:max-w-xs">
-            <option value="">— ไม่ใช้บริบท —</option>
-            {Object.keys(users).map((uid) => <option key={uid} value={uid}>{uid} ({users[uid].app_name || 'แอป'})</option>)}
+            className="bg-bg1/70 border border-line rounded-lg px-2 py-1.5 outline-none focus:border-accent max-w-[60vw] sm:max-w-xs"
+            title="เลือกคน = สั่งงาน/คุยในบริบทของคนนั้น · อัตโนมัติ = ให้ซินเลือกคนเองจากคำสั่ง">
+            <option value="">— อัตโนมัติ (ซินเลือกคนเอง) —</option>
+            {Object.keys(users).map((uid) => <option key={uid} value={uid}>{users[uid].app_name || 'แอป'} ({uid})</option>)}
           </select>
         </div>
       </div>

@@ -1,7 +1,7 @@
 """
 SynaptaOS Hub Builder
 GUI สำหรับตั้งค่า .env และ compile hub agent เป็น .exe ไฟล์เดียว
-รันด้วย: python hub/build_gui.py  (จาก project root)
+รันด้วย: python packaging/build_gui.py  (จาก root ของ repo)
 """
 
 import os, sys, threading, queue, shutil, importlib.util, subprocess
@@ -9,11 +9,12 @@ import customtkinter as ctk
 from dotenv import dotenv_values
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))   # hub/
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)                  # project root
-ENV_PATH     = os.path.join(SCRIPT_DIR, ".env")
-AGENT_PY     = os.path.join(SCRIPT_DIR, "main.py")   # entry point (MCP server + discovery)
-DIST_DIR     = os.path.join(SCRIPT_DIR, "dist")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))   # packaging/
+HUB_ROOT   = os.path.dirname(SCRIPT_DIR)                   # root ของ repo
+SRC_DIR    = os.path.join(HUB_ROOT, "src")                 # โค้ดรันจริงอยู่ใน src/
+ENV_PATH   = os.path.join(SRC_DIR, ".env")
+AGENT_PY   = os.path.join(SRC_DIR, "main.py")             # entry point (MCP server + discovery)
+DIST_DIR   = os.path.join(HUB_ROOT, "dist")
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -254,7 +255,7 @@ class HubBuilder(ctk.CTk):
 
             cmd.append(AGENT_PY)
 
-            os.chdir(PROJECT_ROOT)
+            os.chdir(SRC_DIR)  # รัน nuitka จาก src/ เพื่อให้เจอโมดูลข้างเคียง (config, store, ...)
 
             proc = subprocess.Popen(
                 cmd,
@@ -282,7 +283,7 @@ class HubBuilder(ctk.CTk):
     def _cleanup_build_dirs(self, q):
         """ลบ .build และ .onefile-build ที่ nuitka ทิ้งไว้หลัง compile"""
         suffixes = (".build", ".onefile-build")
-        for search in [DIST_DIR, PROJECT_ROOT]:
+        for search in [DIST_DIR, SRC_DIR]:
             if not os.path.isdir(search):
                 continue
             for entry in os.listdir(search):

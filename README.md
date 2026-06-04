@@ -1,96 +1,126 @@
 # SynaptaHub
 
-Python agent สำหรับระบบ [SynaptaOS](https://github.com/Ninlapat5G/SynaptaOS-V0) — รันบน PC/Mac/Linux แล้วให้ AI สั่งงานเครื่องผ่านภาษาธรรมชาติ
+สมองฝั่งบ้านของ [SynaptaOS](https://github.com/Ninlapat5G/SynaptaOS-App) — รันบน PC / Mac / Raspberry Pi
+แล้วเปิดให้ "ซิน" (ผู้ช่วย AI ในแอป) สั่งงานเครื่องนี้ผ่านภาษาคน + ดูแลผู้ใช้ได้หลายคน
 
 ---
 
-## How it fits
+## ภาพรวม
 
 ```mermaid
-flowchart TD
-    classDef app    fill:#1d3557,color:#fff,stroke:#457b9d,stroke-width:2px
-    classDef broker fill:#457b9d,color:#fff,stroke:none
-    classDef hub    fill:#2d6a4f,color:#fff,stroke:none
-    classDef tool   fill:#6d6875,color:#fff,stroke:none
+flowchart LR
+    APP["SynaptaOS App\n(มือถือ — ซิน)"]
+    HUB["SynaptaHub\n(PC / RPi — ซินร่างบนคอม)"]
+    LLM["LLM (gemma @ DGX)"]
+    BR["MQTT Broker"]
 
-    WA[SynaptaOS Web App]:::app
-    B1[MQTT Broker]:::broker
-    HUB["SynaptaHub\n(PC / Mac / Linux)"]:::hub
-    TOOLS["os_exec · web_search · query_kg"]:::tool
-    B2[MQTT Broker]:::broker
+    APP -->|"MCP over HTTP (Tailscale)\nrun_task / sync ข้อมูล"| HUB
+    HUB -->|"MQTT: คำสั่ง/ข้อความถึงแอป\nusers/{id}/hub_cmd"| BR
+    BR -->|"ตอบกลับ users/{id}/hub_response"| HUB
+    BR --> APP
+    HUB -->|"discovery: hub/{name}/status (retained)"| BR
+    HUB <-->|ReAct loop| LLM
+```
 
-    WA -->|task| B1
-    B1 --> HUB
-    HUB <-->|LangGraph ReAct loop| TOOLS
-    HUB -->|stream output| B2
-    B2 -->|streaming| WA
+- **App → Hub**: ผ่าน **MCP over HTTP** บนวง Tailscale (เข้ารหัส WireGuard) — แอปเรียก `run_task`, sync โปรไฟล์/อุปกรณ์ ฯลฯ
+- **Hub → App**: ผ่าน **MQTT** — Hub ส่งคำสั่ง/ข้อความไปแอป แล้วรอผลกลับ
+- **Discovery**: Hub broadcast ที่อยู่ (Tailscale IP + พอร์ต) ขึ้น MQTT แบบ retained ให้แอปเจอเอง
+
+---
+
+## โครงสร้างไฟล์
+
+```
+SynaptaOS-Hub/
+├── src/                 โค้ดที่รันจริงทั้งหมด
+│   ├── main.py          entry point (discovery + MCP server)
+│   ├── config.py        อ่านค่าทั้งหมดจาก .env
+│   ├── agent.py         สมอง ReAct ของ Hub (รู้จักผู้ใช้หลายคน)
+│   ├── server.py        FastMCP server (App ต่อเข้ามา)
+│   ├── webadmin.py      หน้าเว็บผู้ดูแล /admin + API
+│   ├── discovery.py     broadcast ที่อยู่ผ่าน MQTT
+│   ├── store.py         เก็บข้อมูลผู้ใช้ (แยกไฟล์ แยกคน)
+│   ├── osprofile.py     คำสั่งเฉพาะ OS (win/mac/linux)
+│   ├── tools/           เครื่องมือ MCP (os_exec, iot, account, ...)
+│   ├── web/             หน้าเว็บผู้ดูแล (React + Tailwind)
+│   ├── data/            ข้อมูลผู้ใช้ (gitignored)
+│   └── .env             ตั้งค่า (gitignored)
+├── packaging/           build_gui.py — คอมไพล์เป็น .exe
+├── docs/                บันทึก/แผน
+└── requirements.txt
 ```
 
 ---
 
-## Installation
+## ติดตั้งและรัน
 
 ```bash
-git clone https://github.com/Ninlapat5G/SynaptaHub-V0.git
-cd SynaptaHub-V0
+git clone https://github.com/Ninlapat5G/SynaptaOS-Hub.git
+cd SynaptaOS-Hub
 pip install -r requirements.txt
-cp .env.example .env
+cp src/.env.example src/.env        # แล้วแก้ค่าใน src/.env
+
+python src/main.py
 ```
 
-แก้ไขค่าใน `.env`:
+พอรัน `main.py` จะทำ 2 อย่าง: broadcast ที่อยู่ (discovery) + เปิด MCP server + หน้าเว็บผู้ดูแล
+
+### ค่าใน `src/.env` ที่สำคัญ
 
 ```env
-LLM_API_KEY=your_api_key
-LLM_BASE_URL=https://api.opentyphoon.ai/v1
-LLM_MODEL=typhoon-v2.5-30b-a3b-instruct
+LLM_BASE_URL=http://dgx:11434/v1     # สมอง LLM (Ollama /v1)
+LLM_MODEL=gemma4:26b
+
+MCP_PORT=8765                        # พอร์ตที่ App + หน้าเว็บใช้
+MCP_TOKEN=                           # รหัสกันแอปแปลกในวง (ว่าง = ไม่เช็ค)
+ADMIN_TOKEN=                         # รหัสหน้าเว็บผู้ดูแล (ว่าง = เข้าได้เลย)
 
 MQTT_BROKER=broker.hivemq.com
-MQTT_PORT=1883
-MQTT_BASE_TOPIC=home/smarthome
-AGENT_NAME=my-hub
+MQTT_PORT=8883
+MQTT_USE_TLS=true
+MQTT_BASE_TOPIC=Mylab/smarthome      # ตั้งให้เฉพาะตัว กันชนกับคนอื่นบน broker สาธารณะ
+AGENT_NAME=office-pc                 # ชื่อ Hub ที่โชว์ในแอป
 ```
 
-รัน:
+---
 
-```bash
-python agent.py
-```
+## หน้าเว็บผู้ดูแล
+
+เปิด **`http://<Tailscale-IP>:8765/admin`** (React + Tailwind, responsive)
+
+- **ผู้ใช้งาน** — ดู/ตรวจข้อมูลผู้ใช้ที่จับคู่ (โปรไฟล์ / อุปกรณ์ / ฉาก / รูทีน / มือถือ)
+- **เอเจนต์** — พิมพ์สั่งซินทำงานได้เลย เลือก *โฟกัสที่ผู้ใช้* คนใดคนหนึ่ง หรือปล่อย *อัตโนมัติ* ให้ซินเลือกคนเองจากคำสั่ง
+- **ระบบหลังบ้าน** — สถานะเครื่อง + รายการเครื่องมือ (MCP tools)
+- **ความปลอดภัย** — ตั้ง `ADMIN_TOKEN` / `MCP_TOKEN` (เขียนลง .env ให้ ไม่ต้องรีสตาร์ท)
+
+---
+
+## เครื่องมือของเอเจนต์
+
+| Tool | ทำอะไร |
+|------|--------|
+| `os_exec` | รันคำสั่ง shell บนเครื่องนี้ |
+| `web_search` | ค้นข้อมูลจากเว็บ (Serper API) |
+| `query_system` | ดูสถานะเครื่องสด (RAM, disk, OS) |
+| `list_users` | ดูรายชื่อผู้ใช้ทั้งหมดที่จับคู่ |
+| `find_user` | ค้น + อ่านตัวตนของผู้ใช้คนหนึ่ง (จากชื่อ) |
+| `read_user_data` | อ่านอุปกรณ์/ฉาก/รูทีน/มือถือ ของผู้ใช้คนหนึ่ง |
+| `send_command_to_user_app` | คุย/สั่งงานแอปมือถือของผู้ใช้ แล้วรอผลกลับ |
+
+> **หลายผู้ใช้**: เลือกโฟกัสคนใดคนหนึ่ง = สั่งงานในบริบทของคนนั้น · ไม่เลือก = ซินดูจากคำสั่งเองว่าหมายถึงใคร แล้วใช้ `find_user` / `read_user_data` ให้ถูกคน
+
+เพิ่ม tool ใหม่: สร้าง `src/tools/<name>.py` (มีฟังก์ชัน `register(mcp)`) แล้วเติมชื่อใน `src/server.py`
 
 ---
 
 ## Build เป็น .exe (Windows)
 
 ```bash
-pip install -r requirements_builder.txt
-python build_gui.py
+pip install -r packaging/requirements_builder.txt
+python packaging/build_gui.py
 ```
 
-GUI จะขึ้นมาให้กรอก settings → กด Build → ได้ `dist/SynaptaHubAgent.exe`
-
----
-
-## Tools ที่ Agent ใช้
-
-| Tool | ทำอะไร |
-|------|--------|
-| `os_exec` | รัน shell command บนเครื่อง |
-| `web_search` | ค้นข้อมูลจากอินเทอร์เน็ต (Serper API) |
-| `query_kg` | refresh สถานะเครื่องสด (RAM, disk, CWD) |
-
-เพิ่ม tool ใหม่: สร้าง `tools/<name>.py` แล้วลงทะเบียนใน `runner.py _make_tools()`
-
----
-
-## MQTT Topics
-
-| Topic | Direction | Description |
-|-------|-----------|-------------|
-| `{base}/hub/{name}/cmd` | Web App → Hub | รับ task (แนบ MQTT 5 ResponseTopic) |
-| `{base}/hub/{name}/cancel` | Web App → Hub | ยกเลิก task ที่รันอยู่ |
-| `{base}/hub/{name}/status` | Hub → Web App | `online` (retained) / `offline` (Last Will) |
-
-**Reply (MQTT 5):** คำตอบส่งกลับที่ `ResponseTopic` ของแต่ละ request โดยใช้ user property `stream_status`:
-`ping` (heartbeat กันตัวจับเวลาหมดระหว่างงานยาว) · `chunk` (ผลลัพธ์) · `end` (จบ stream)
+GUI ขึ้นมาให้กรอก settings → กด Build → ได้ `dist/SynaptaHubAgent.exe`
 
 ---
 
