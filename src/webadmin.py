@@ -26,6 +26,14 @@ def verify_token(request: Request) -> bool:
 
 def mount(app, mcp):
     """ทำการเชื่อมโยงเส้นทางของหน้าเว็บควบคุมเข้ากับ Starlette App"""
+    main_loop = None
+
+    def capture_loop():
+        nonlocal main_loop
+        try:
+            main_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
 
     # Starlette รุ่นใหม่ (1.x) ถอด decorator @app.route/@app.websocket_route ออกแล้ว
     # ใช้ add_route/add_websocket_route แทน — ห่อเป็น decorator เล็กๆ เพื่อคงรูปแบบโค้ดเดิม
@@ -52,6 +60,7 @@ def mount(app, mcp):
     # 2. API ดึงรายชื่อผู้ใช้ทั้งหมด
     @route("/admin/api/users", methods=["GET"])
     async def api_list_users(request):
+        capture_loop()
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         users = store.list_users()
@@ -197,6 +206,7 @@ def mount(app, mcp):
     
     @ws_route("/admin/ws")
     async def websocket_endpoint(websocket: WebSocket):
+        capture_loop()
         token = websocket.query_params.get("token", "")
         admin_token = config.get_admin_token()
         if admin_token and token != admin_token:
@@ -215,7 +225,15 @@ def mount(app, mcp):
                 active_websockets.remove(websocket)
 
     def broadcast_update(user_id: str, kind: str, data):
-        loop = asyncio.get_event_loop()
+        loop = main_loop
+        if not loop:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    return
         
         async def do_broadcast():
             payload = json.dumps({
@@ -232,7 +250,7 @@ def mount(app, mcp):
                     if ws in active_websockets:
                         active_websockets.remove(ws)
                         
-        if loop.is_running():
+        if loop and loop.is_running():
             asyncio.run_coroutine_threadsafe(do_broadcast(), loop)
             
     store.add_listener(broadcast_update)
