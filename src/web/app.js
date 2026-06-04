@@ -357,10 +357,9 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
 }
 
 // ── แท็บ 2: เอเจนต์ ─────────────────────────────────────────────────────────
-function AgentTab({ users }) {
-  const [msgs, setMsgs] = useState([{ role: 'sys', text: 'ระบบพร้อมแล้ว พิมพ์คำสั่งให้เอเจนต์ทำงานได้เลย เช่น "เปิดเพลง lofi" หรือ "ดู disk ที่เหลือ"' }]);
+// msgs/ctxUser ยกขึ้นไปไว้ที่ App → สลับแท็บแล้วบทสนทนาไม่หาย (อยู่จน refresh หน้า)
+function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
   const [input, setInput] = useState('');
-  const [ctxUser, setCtxUser] = useState('');
   const [busy, setBusy] = useState(false);
   const boxRef = useRef(null);
 
@@ -562,6 +561,9 @@ function App() {
   const [users, setUsers] = useState({});
   const [online, setOnline] = useState(false);
   const [liveUpdate, setLiveUpdate] = useState(null);
+  // บทสนทนาแท็บเอเจนต์ — เก็บที่นี่เพื่อให้คงอยู่ข้ามการสลับแท็บ (จนกว่าจะ refresh)
+  const [agentMsgs, setAgentMsgs] = useState([{ role: 'sys', text: 'ระบบพร้อมแล้ว พิมพ์คำสั่งให้เอเจนต์ทำงานได้เลย เช่น "เปิดเพลง lofi" หรือ "ดู disk ที่เหลือ"' }]);
+  const [agentCtxUser, setAgentCtxUser] = useState('');
   const wsRef = useRef(null);
 
   const reloadUsers = useCallback(async () => {
@@ -627,7 +629,7 @@ function App() {
       <Header tab={tab} setTab={setTab} online={online} hasToken={!!TOKEN} onLogout={logout} />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 fade-in" key={tab}>
         {tab === 'users' && <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />}
-        {tab === 'agent' && <AgentTab users={users} />}
+        {tab === 'agent' && <AgentTab users={users} msgs={agentMsgs} setMsgs={setAgentMsgs} ctxUser={agentCtxUser} setCtxUser={setAgentCtxUser} />}
         {tab === 'system' && <SystemTab />}
         {tab === 'settings' && <SettingsTab onTokenSaved={reloadUsers} />}
       </main>

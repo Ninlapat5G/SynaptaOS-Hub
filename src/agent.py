@@ -170,6 +170,11 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
             return f"ไม่พบผู้ใช้ที่ตรงกับ '{user_query}'"
         if kind not in store.PARTS:
             return f"kind ไม่ถูกต้อง (ใช้ได้: {', '.join(store.PARTS)})"
+        # สถานะสด (อุปกรณ์/มือถือ) → ขอให้แอป push ล่าสุดก่อนอ่าน จะได้ไม่ใช้ของเก่า (ไม่รอ heartbeat)
+        if kind in ("kd", "phone"):
+            import time
+            account.request_app_refresh(uid)
+            time.sleep(1.5)
         data = store.load_part(uid, kind)
         return json.dumps(data, ensure_ascii=False) if data is not None else f"(ไม่มีข้อมูล {kind} ของคนนี้)"
 

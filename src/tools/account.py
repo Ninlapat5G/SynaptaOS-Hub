@@ -98,6 +98,19 @@ def find_user_by_query(user_query: str) -> str | None:
     return best_match
 
 
+def request_app_refresh(user_id: str) -> None:
+    """บอกแอปให้ push สถานะล่าสุด (อุปกรณ์/มือถือ) ขึ้นมาทันที — ไม่ต้องรอ heartbeat
+    publish users/{id}/sync_req · แอปฝั่งนั้นรับแล้วจะ fullSync กลับมาเก็บที่ store"""
+    import paho.mqtt.publish as publish
+    import config
+    topic = config.topic(f"users/{user_id}/sync_req")
+    tls = {"cert_reqs": __import__("ssl").CERT_NONE} if config.MQTT_USE_TLS else None
+    try:
+        publish.single(topic, payload="{}", hostname=config.MQTT_BROKER, port=config.MQTT_PORT, qos=1, tls=tls)
+    except Exception:
+        pass
+
+
 def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender: str = "hub",
                           wait_response: bool = True, timeout: float = 45.0) -> str:
     """ส่งคำสั่งไปแอปผ่าน MQTT แล้ว (ถ้า wait_response) รอผลกลับจากแอปบน users/{id}/hub_response
