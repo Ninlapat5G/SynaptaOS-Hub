@@ -36,7 +36,12 @@ def _ensure_app():
 
 
 def send(user_id: str, title: str, body: str, data: dict | None = None) -> bool:
-    """ส่ง FCM ไปเครื่องของ user (อ่าน fcmToken จาก profile). คืน True ถ้าส่งออกสำเร็จ"""
+    """ส่ง FCM ไปเครื่องของ user (อ่าน fcmToken จาก profile). คืน True ถ้าส่งออกสำเร็จ
+
+    ส่งแบบ **data-only** (ไม่มี notification block) ตั้งใจให้ระบบไม่โชว์ noti ดิบที่บริบทผิดเอง
+    — ปล่อยให้ฝั่งแอป (ซิน) อ่าน data แล้วสร้าง noti ที่รู้ว่ามาจาก Hub ขึ้นมาเอง
+    (title/body เก็บไว้เผื่อ debug แต่ไม่แนบไปกับ message)
+    """
     if _ensure_app() is None:
         return False
     prof = store.load_part(user_id, "profile") or {}
@@ -45,9 +50,9 @@ def send(user_id: str, title: str, body: str, data: dict | None = None) -> bool:
         return False
     from firebase_admin import messaging
     payload = {k: str(v) for k, v in (data or {}).items()}  # FCM data ต้องเป็น string ทั้งหมด
+    # priority high + ไม่มี notification block → ปลุก onBackgroundMessage ฝั่งแอปแม้ตอนพับ/ถูกฆ่า
     msg = messaging.Message(
         token=token,
-        notification=messaging.Notification(title=title, body=body),
         data=payload,
         android=messaging.AndroidConfig(priority="high"),
     )
