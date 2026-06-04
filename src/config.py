@@ -46,6 +46,14 @@ AGENT_NAME = os.getenv("AGENT_NAME", "office-pc")
 # ── Storage (ข้อมูลต่อ user — เก็บแยกไฟล์ รองรับ multi-user) ──────────────────
 DATA_DIR = os.getenv("DATA_DIR") or str(Path(__file__).resolve().parent / "data")
 
+# ── FCM (ช่องสำรองเด้งหาแอป เมื่อ MQTT ส่งไม่ถึง / Hub อยากส่งตรง) ────────────
+# path ไปไฟล์ service account JSON ของ Firebase — ว่าง = ปิดการใช้ FCM
+# ใส่แค่ชื่อไฟล์ก็ได้ (จะอ้างอิงจากโฟลเดอร์ src/ นี้) หรือใส่ path เต็มก็ได้
+_fcm = os.getenv("FCM_CREDENTIALS", "")
+if _fcm and not os.path.isabs(_fcm):
+    _fcm = str(Path(__file__).resolve().parent / _fcm)
+FCM_CREDENTIALS = _fcm
+
 # ── Misc ─────────────────────────────────────────────────────────────────────
 COMMAND_TIMEOUT = float(os.getenv("COMMAND_TIMEOUT", "60"))
 SERPER_API_KEY  = os.getenv("SERPER_API_KEY", "")

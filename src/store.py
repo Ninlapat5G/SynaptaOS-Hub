@@ -123,3 +123,26 @@ def load_part(user_id: str, kind: str):
 
 def list_users() -> dict:
     return _read_json(_REGISTRY) or {}
+
+
+def delete_user(user_id: str) -> bool:
+    """ลบ user ออกจากระบบ: ลบโฟลเดอร์เก็บข้อมูล และลบจาก registry.json"""
+    uid_safe = _safe(user_id)
+    with _lock:
+        # 1. ลบจาก registry
+        reg = _read_json(_REGISTRY) or {}
+        if uid_safe in reg:
+            del reg[uid_safe]
+            _write_json(_REGISTRY, reg)
+        # 2. ลบโฟลเดอร์ของ user (รวมไฟล์ทั้งหมดข้างใน)
+        d = _user_dir(uid_safe)
+        if d.exists():
+            import shutil
+            try:
+                shutil.rmtree(d)
+            except Exception as e:
+                print(f"[store] Error deleting folder for {uid_safe}: {e}")
+                return False
+        # 3. แจ้งเตือนผู้ฟัง
+        _notify(uid_safe, "delete", None)
+        return True

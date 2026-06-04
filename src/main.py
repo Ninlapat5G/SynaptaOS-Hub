@@ -7,6 +7,7 @@ SynaptaOS Hub — entry point
 
 import config
 import discovery
+import telemetry
 import server
 from tools import system_info
 
@@ -26,8 +27,14 @@ def main():
         print(f"[discovery] start failed (broadcast disabled): {e}")
 
     try:
+        telemetry.start()
+    except Exception as e:
+        print(f"[telemetry] start failed (phone telemetry disabled): {e}")
+
+    try:
         server.run()
     finally:
+        telemetry.stop()
         discovery.stop()
 
 

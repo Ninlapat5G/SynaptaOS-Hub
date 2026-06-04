@@ -79,7 +79,7 @@ function Login({ onSuccess }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg0/80 backdrop-blur-sm p-5">
       <Card className="w-full max-w-md p-8 fade-in">
         <div className="flex flex-col items-center text-center gap-2 mb-6">
-          <span className="w-14 h-14 rounded-full glow-accent" style={{ background: 'linear-gradient(135deg,#00D4FF,#B44FFF)' }} />
+          <img src="/admin/static/logo.jpg" alt="SynaptaOS" className="w-16 h-16 rounded-2xl glow-accent object-cover" />
           <h2 className="text-xl font-semibold mt-2">เข้าสู่ระบบผู้ดูแล</h2>
           <p className="text-sm text-inkDim">ระบุกุญแจความปลอดภัย (ADMIN_TOKEN) ของคุณ</p>
         </div>
@@ -112,7 +112,7 @@ function Header({ tab, setTab, online, hasToken, onLogout }) {
     <header className="glass-soft sticky top-0 z-30 border-b border-line">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-3">
         <div className="flex items-center gap-2.5">
-          <span className="w-8 h-8 rounded-full glow-accent shrink-0" style={{ background: 'linear-gradient(135deg,#00D4FF,#B44FFF)' }} />
+          <img src="/admin/static/logo.jpg" alt="SynaptaOS" className="w-8 h-8 rounded-lg glow-accent shrink-0 object-cover" />
           <h1 className="text-lg font-semibold">SynaptaOS <span className="text-gradient font-bold">Hub</span></h1>
           <Badge color="accent2">ADMIN</Badge>
         </div>
@@ -282,6 +282,19 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
+  const deleteUser = async (uid) => {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบผู้ใช้ ${uid}?\nข้อมูลทั้งหมด (Profile, อุปกรณ์, Scenes, Routines) จะถูกลบออกอย่างถาวร`)) {
+      return;
+    }
+    try {
+      await api(`/admin/api/users/${uid}`, { method: 'DELETE' });
+      setSel(null);
+      reloadUsers();
+    } catch (e) {
+      alert('ลบไม่สำเร็จ: ' + e.message);
+    }
+  };
+
   const loadPart = useCallback(async (uid, p) => {
     if (!uid) return;
     setLoading(true); setErr(''); setData(undefined);
@@ -336,9 +349,15 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
         </Card>
       ) : (
         <Card className="p-4 sm:p-5">
-          <div className="mb-4">
-            <h3 className="font-semibold font-mono text-sm break-all">{sel}</h3>
-            <p className="text-xs text-inkDim mt-0.5">แอป: {users[sel] && users[sel].app_name || '—'} • ล่าสุด: {thDate(users[sel] && users[sel].last_seen)}</p>
+          <div className="mb-4 flex justify-between items-start gap-4">
+            <div>
+              <h3 className="font-semibold font-mono text-sm break-all">{sel}</h3>
+              <p className="text-xs text-inkDim mt-0.5">แอป: {users[sel] && users[sel].app_name || '—'} • ล่าสุด: {thDate(users[sel] && users[sel].last_seen)}</p>
+            </div>
+            <button onClick={() => deleteUser(sel)}
+              className="text-xs px-3 py-1.5 rounded-lg border border-red-500/40 text-red-400 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500 transition">
+              ลบผู้ใช้
+            </button>
           </div>
           <div className="flex items-center gap-1.5 overflow-x-auto border-b border-line pb-3 mb-4">
             {PART_KEYS.map((p) => (
@@ -370,12 +389,14 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
     const task = input.trim();
     if (!task || busy) return;
     setInput('');
+    // ประวัติที่ส่งไปให้ agent จำบริบท (ก่อนเพิ่มข้อความใหม่) — เอาเฉพาะ user/agent
+    const history = msgs.filter((m) => m.role === 'user' || m.role === 'agent').map((m) => ({ role: m.role, text: m.text }));
     setMsgs((m) => [...m, { role: 'user', text: task }]);
     setBusy(true);
     try {
       const r = await api('/admin/api/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, user_id: ctxUser || null }),
+        body: JSON.stringify({ task, user_id: ctxUser || null, history }),
       });
       setMsgs((m) => [...m, { role: 'agent', text: r.reply || '[ไม่มีการตอบกลับ]' }]);
     } catch (err) {
@@ -398,7 +419,14 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
   return (
     <Card className="p-4 sm:p-5 flex flex-col h-[76vh]">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
-        <h2 className="font-semibold">สั่งการเอเจนต์ (Agent Shell)</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold">สั่งการเอเจนต์ (Agent Shell)</h2>
+          <button onClick={() => setMsgs([{ role: 'sys', text: 'เริ่มบทสนทนาใหม่แล้ว — พิมพ์คำสั่งให้เอเจนต์ได้เลย' }])}
+            title="ล้างประวัติบทสนทนา"
+            className="text-xs px-2.5 py-1 rounded-lg border border-line text-inkDim hover:text-danger hover:border-danger/40 transition">
+            ล้างประวัติ
+          </button>
+        </div>
         <div className="flex items-center gap-2 text-sm">
           <span className="text-inkDim whitespace-nowrap">โฟกัสที่ผู้ใช้:</span>
           <select value={ctxUser} onChange={(e) => setCtxUser(e.target.value)}
@@ -561,7 +589,7 @@ function App() {
   const [users, setUsers] = useState({});
   const [online, setOnline] = useState(false);
   const [liveUpdate, setLiveUpdate] = useState(null);
-  // บทสนทนาแท็บเอเจนต์ — เก็บที่นี่เพื่อให้คงอยู่ข้ามการสลับแท็บ (จนกว่าจะ refresh)
+  // บทสนทนาแท็บเอเจนต์ — เก็บในหน่วยความจำเท่านั้น (คงอยู่ข้ามการสลับแท็บ แต่ reload หน้า = เริ่มใหม่)
   const [agentMsgs, setAgentMsgs] = useState([{ role: 'sys', text: 'ระบบพร้อมแล้ว พิมพ์คำสั่งให้เอเจนต์ทำงานได้เลย เช่น "เปิดเพลง lofi" หรือ "ดู disk ที่เหลือ"' }]);
   const [agentCtxUser, setAgentCtxUser] = useState('');
   const wsRef = useRef(null);
@@ -582,6 +610,10 @@ function App() {
       try {
         const m = JSON.parse(ev.data);
         if (m.type === 'update') {
+          if (m.kind === 'delete') {
+            reloadUsers();
+            return;
+          }
           setUsers((prev) => {
             if (!prev[m.user_id]) { reloadUsers(); return prev; }
             return { ...prev, [m.user_id]: { ...prev[m.user_id], last_seen: Math.floor(Date.now() / 1000) } };

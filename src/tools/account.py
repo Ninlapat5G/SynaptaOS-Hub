@@ -16,9 +16,10 @@ import store
 def register(mcp):
     @mcp.tool()
     def register(user_id: str, app_name: str) -> str:
-        """ลงทะเบียนแอปกับ Hub (จับคู่ครั้งแรก). user_id = รหัสประจำแอป, app_name = ชื่อที่โชว์. Hub จะจดไว้เพื่อให้สั่งงานและเก็บข้อมูลแยกตามผู้ใช้"""
+        """ลงทะเบียนแอปกับ Hub (จับคู่ครั้งแรก). user_id = รหัสประจำแอป, app_name = ชื่อที่โชว์. Hub จะจดไว้เพื่อให้สั่งงานและเก็บข้อมูลแยกตามผู้ใช้
+        คืน telemetry_topic = topic MQTT ที่แอปต้อง publish สถานะมือถือ (แบต/ตำแหน่ง) ขึ้นมาให้ Hub"""
         r = store.register_user(user_id, app_name)
-        return json.dumps({"ok": True, **r}, ensure_ascii=False)
+        return json.dumps({"ok": True, "telemetry_topic": f"users/{user_id}/telemetry", **r}, ensure_ascii=False)
 
     @mcp.tool()
     def sync_data(user_id: str, kind: str, data_json: str) -> str:
@@ -175,6 +176,18 @@ def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender:
         client.disconnect()
 
     if not got:
+        # แอปไม่ตอบ MQTT (น่าจะพับ/ถูกฆ่า/หลับ) → ลองเด้งผ่าน FCM ปลุกเครื่องแทน
+        from tools import fcm_push
+        title = "ซินมีข้อความถึงคุณ" if command_type == "chat" else "Hub ฝากงานให้ทำ"
+        body = command if len(command) <= 120 else command[:117] + "..."
+        sent = fcm_push.send(user_id, title, body, {
+            "corr_id": corr_id,
+            "sender": sender,
+            "type": command_type,
+            ("text" if command_type == "chat" else "action_prompt"): command,
+        })
+        if sent:
+            return f"แอปไม่ตอบ MQTT ใน {int(timeout)} วิ — ส่งผ่าน FCM ปลุกเครื่องแทนแล้ว (corr_id: {corr_id})"
         return f"ส่งคำสั่งไปแล้วแต่แอปยังไม่ตอบกลับใน {int(timeout)} วินาที (อาจออฟไลน์หรือกำลังยุ่ง) — corr_id: {corr_id}"
     status = "สำเร็จ" if result["ok"] else "ไม่สำเร็จ"
     return f"แอปทำงานเสร็จแล้ว ({status}): {result['detail'] or '(ไม่มีรายละเอียด)'}"

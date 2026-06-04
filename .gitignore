@@ -7,3 +7,7 @@ build/
 *.spec
 run_hub.bat
 data/
+.venv/
+# ความลับ FCM — service account ของ Firebase
+fcm-service-account.json
+*-firebase-adminsdk-*.json

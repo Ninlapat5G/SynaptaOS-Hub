@@ -11,7 +11,7 @@ import json
 import threading
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
@@ -204,6 +204,7 @@ def run(
     timeout: float | None = None,
     now: str | None = None,
     user_id: str | None = None,
+    history: list | None = None,
 ) -> str:
     os_type    = os_type or config.OS_TYPE
     timeout    = timeout if timeout is not None else config.COMMAND_TIMEOUT
@@ -221,10 +222,22 @@ def run(
     ) + "\n\n" + system_info.snapshot_text()
     graph = create_react_agent(_model, _make_tools(kill_event, timeout, cwd_box, user_id), prompt=system_prompt)
 
+    # ประวัติบทสนทนา (จากหน้าเว็บ) — ให้ agent จำบริบทที่คุยกันก่อนหน้าได้ (multi-turn)
+    msgs = []
+    for h in (history or [])[-10:]:  # เอาแค่ 10 ข้อความล่าสุด พอให้จำบริบท ไม่บวม
+        role, text = h.get("role"), (h.get("text") or "").strip()
+        if not text:
+            continue
+        if role == "user":
+            msgs.append(HumanMessage(text))
+        elif role == "agent":
+            msgs.append(AIMessage(text))
+    msgs.append(HumanMessage(task))
+
     final_text = ""
     try:
         for event in graph.stream(
-            {"messages": [HumanMessage(task)]},
+            {"messages": msgs},
             config={"recursion_limit": 10},
             stream_mode="updates",
         ):

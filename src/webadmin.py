@@ -27,8 +27,22 @@ def verify_token(request: Request) -> bool:
 def mount(app, mcp):
     """ทำการเชื่อมโยงเส้นทางของหน้าเว็บควบคุมเข้ากับ Starlette App"""
 
+    # Starlette รุ่นใหม่ (1.x) ถอด decorator @app.route/@app.websocket_route ออกแล้ว
+    # ใช้ add_route/add_websocket_route แทน — ห่อเป็น decorator เล็กๆ เพื่อคงรูปแบบโค้ดเดิม
+    def route(path, methods=["GET"]):
+        def deco(fn):
+            app.add_route(path, fn, methods=methods)
+            return fn
+        return deco
+
+    def ws_route(path):
+        def deco(fn):
+            app.router.add_websocket_route(path, fn)
+            return fn
+        return deco
+
     # 1. หน้ากากควบคุมหลัก
-    @app.route("/admin", methods=["GET"])
+    @route("/admin", methods=["GET"])
     async def admin_page(request):
         index_file = WEB_DIR / "index.html"
         if not index_file.exists():
@@ -36,15 +50,28 @@ def mount(app, mcp):
         return FileResponse(str(index_file))
 
     # 2. API ดึงรายชื่อผู้ใช้ทั้งหมด
-    @app.route("/admin/api/users", methods=["GET"])
+    @route("/admin/api/users", methods=["GET"])
     async def api_list_users(request):
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         users = store.list_users()
         return JSONResponse(users)
 
+    # API ลบผู้ใช้ออก
+    @route("/admin/api/users/{uid}", methods=["DELETE"])
+    async def api_delete_user(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        uid = request.path_params.get("uid", "")
+        uid_safe = store._safe(uid)
+        success = store.delete_user(uid_safe)
+        if success:
+            return JSONResponse({"status": "deleted"})
+        else:
+            return JSONResponse({"error": "failed to delete user"}, status_code=500)
+
     # 3. API ดึงข้อมูลส่วนย่อยของผู้ใช้
-    @app.route("/admin/api/users/{uid}/{kind}", methods=["GET"])
+    @route("/admin/api/users/{uid}/{kind}", methods=["GET"])
     async def api_get_user_part(request):
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -58,7 +85,7 @@ def mount(app, mcp):
         return JSONResponse(data)
 
     # 4. API บันทึกข้อมูลส่วนย่อยของผู้ใช้
-    @app.route("/admin/api/users/{uid}/{kind}", methods=["PUT"])
+    @route("/admin/api/users/{uid}/{kind}", methods=["PUT"])
     async def api_put_user_part(request):
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -77,7 +104,7 @@ def mount(app, mcp):
         return JSONResponse({"status": "saved"})
 
     # 5. API คุยกับเอเจนต์แบบสลับเธรด (Thread) เพื่อป้องกันไม่ให้เซิร์ฟเวอร์ค้าง
-    @app.route("/admin/api/agent", methods=["POST"])
+    @route("/admin/api/agent", methods=["POST"])
     async def api_agent_chat(request):
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -92,13 +119,14 @@ def mount(app, mcp):
             
         user_id = body.get("user_id")
         user_id_safe = store._safe(user_id) if user_id else None
-        
+        history = body.get("history") or []  # ประวัติบทสนทนาก่อนหน้า (multi-turn memory)
+
         # เรียกเอเจนต์ด้วย asyncio.to_thread เพื่อไม่ให้กีดกันการทำงานของ Event Loop
-        reply = await asyncio.to_thread(agent.run, task, user_id=user_id_safe)
+        reply = await asyncio.to_thread(agent.run, task, user_id=user_id_safe, history=history)
         return JSONResponse({"reply": reply})
 
     # 6. API ข้อมูลระบบหลักและเครื่องมือเชื่อมต่อ (MCP Tools)
-    @app.route("/admin/api/system", methods=["GET"])
+    @route("/admin/api/system", methods=["GET"])
     async def api_system_info(request):
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -121,7 +149,7 @@ def mount(app, mcp):
         })
 
     # 7. API ดึงค่าการตั้งค่ารหัสผ่านปัจจุบัน
-    @app.route("/admin/api/settings/passwords", methods=["GET"])
+    @route("/admin/api/settings/passwords", methods=["GET"])
     async def api_get_passwords(request):
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -131,7 +159,7 @@ def mount(app, mcp):
         })
 
     # 8. API อัปเดตรหัสผ่านใหม่ลงไฟล์ .env
-    @app.route("/admin/api/settings/passwords", methods=["POST"])
+    @route("/admin/api/settings/passwords", methods=["POST"])
     async def api_change_passwords(request):
         if not verify_token(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -167,7 +195,7 @@ def mount(app, mcp):
     
     active_websockets: list[WebSocket] = []
     
-    @app.websocket_route("/admin/ws")
+    @ws_route("/admin/ws")
     async def websocket_endpoint(websocket: WebSocket):
         token = websocket.query_params.get("token", "")
         admin_token = config.get_admin_token()
