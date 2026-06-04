@@ -24,7 +24,7 @@ from tools import system_info
 
 _SYSTEM = """\
 คุณคือ "SynaptaOS Hub" — ระบบกลางอัจฉริยะที่ทำงานบนเครื่อง {os_type} ที่บ้าน คอยดูแลบ้าน อุปกรณ์ และให้บริการผู้ใช้ได้หลายคน
-คุณไม่ใช่ผู้ช่วยส่วนตัวของใครคนใดคนหนึ่ง แต่เป็น "ระบบกลาง" ที่รับคำสั่งเข้ามาแล้วลงมือทำให้ — คนละบทบาทกับผู้ช่วยส่วนตัว (ซิน) ที่อยู่บนแอปมือถือของผู้ใช้
+คุณไม่ใช่ผู้ช่วยส่วนตัวของใครคนใดคนหนึ่ง แต่เป็น "ระบบกลาง" ที่รับคำสั่งเข้ามาแล้วลงมือทำให้ — คนละบทบาทกับผู้ช่วยส่วนตัวที่อยู่บนแอปมือถือของผู้ใช้
 
 {about_user}
 
@@ -43,6 +43,12 @@ Hub นี้ดูแลผู้ใช้ได้หลายคน — แ�
 - send_command_to_user_app(ชื่อ, ข้อความ, ประเภท) → คุย/สั่งงานแอปมือถือของคนนั้น (เช่น "บอกนินว่า...", "สั่งแอร์ห้องสมใจ")
 → ดูจากคำสั่งว่าหมายถึงใคร แล้วเรียกเครื่องมือกับคนนั้นให้ถูก · ถ้ากำกวมว่าใคร ให้ถามกลับสั้นๆ
 → ถ้าจะอ้างถึงคนที่กำลังโฟกัสอยู่ (ถ้ามี) ใส่ชื่อว่างได้ เครื่องมือจะเข้าใจเอง
+
+[กฎการสื่อสารกับแอปผู้ช่วยส่วนตัว (send_command_to_user_app)]
+- เมื่อต้องการส่งคำสั่งหรือข้อความคุยแชทไปยังแอปมือถือของผู้ใช้ผ่าน `send_command_to_user_app` คุณต้องนำความเข้าใจต่อไปนี้มาประยุกต์ใช้ในการเขียนคำสั่ง/ข้อความ:
+  1. ชื่อผู้ช่วยส่วนตัวของเขา (เช่น "ซิน") และบุคลิก/System Prompt ของผู้ช่วยคนนั้น
+  2. ความสัมพันธ์ระหว่างตัวผู้ใช้ (เช่น "นิน") กับผู้ช่วยของเขา (เช่น "นินเป็นพ่อของซิน")
+- ปรับแต่งลักษณะคำสั่งหรือข้อความสนทนาให้สอดคล้องเพื่อให้การสื่อสารระหว่างคุณ (Hub) และผู้ช่วยส่วนตัวของเขาเป็นไปอย่างราบรื่นและเป็นธรรมชาติที่สุด (เช่น สั่งงานผู้ช่วยด้วยสไตล์ที่เป็นกันเองตามที่ผู้ช่วยคนนั้นคุ้นเคยเพื่อให้ผู้ช่วยนำไปคุยและบริการผู้ใช้ได้อย่างราบรื่น)
 
 [กฎสำคัญ]
 - เปิดเพลงโดยไม่ระบุ platform → ใช้ YouTube เป็น default เสมอ
@@ -78,11 +84,18 @@ def _context(user_id: str | None) -> str:
         name = prof.get("displayName") or prof.get("app_name") or user_id
         bio = (prof.get("userBio") or "").strip()
         mem = (prof.get("userMemory") or "").strip()
+        assistant_name = prof.get("assistantName") or "ซิน"
+        system_prompt = (prof.get("systemPrompt") or "").strip()
+
         lines = [f"ชื่อ: {name} (id: {user_id})"]
         if bio:
             lines.append(f"เกี่ยวกับเขา: {bio}")
         if mem:
             lines.append(f"สิ่งที่รู้เพิ่มเติม: {mem}")
+        lines.append(f"แอปผู้ช่วยส่วนตัวบนมือถือของเขาชื่อ: \"{assistant_name}\"")
+        if system_prompt:
+            lines.append(f"System Prompt / บุคลิกของผู้ช่วย \"{assistant_name}\": \"{system_prompt}\"")
+
         return (
             "[ผู้ใช้ที่กำลังโฟกัสตอนนี้ — ถ้าคำสั่งพูดลอย ๆ ไม่ระบุชื่อ ให้หมายถึงคนนี้เสมอ]\n"
             + "\n".join(lines)
@@ -99,7 +112,8 @@ def _context(user_id: str | None) -> str:
         prof = store.load_part(uid, "profile") or {}
         name = prof.get("displayName") or prof.get("app_name") or uid
         bio = (prof.get("userBio") or "").strip()
-        roster.append(f"- {name} (id: {uid})" + (f" — {bio}" if bio else ""))
+        assistant_name = prof.get("assistantName") or "ซิน"
+        roster.append(f"- {name} (id: {uid}, ผู้ช่วยของเขาชื่อ: \"{assistant_name}\")" + (f" — {bio}" if bio else ""))
     return (
         "[ผู้ใช้ในระบบ — มีได้หลายคน ดูให้ดีว่าคำสั่งหมายถึงใคร]\n"
         + "\n".join(roster)
@@ -190,7 +204,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
             return f"ไม่พบผู้ใช้ที่ตรงกับคำค้นหา: '{user_query}'"
         prof = store.load_part(uid, "profile") or {}
         display_name = prof.get("displayName") or prof.get("app_name") or uid
-        res = account.send_mqtt_app_command(uid, command, command_type)
+        res = account.send_mqtt_app_command(uid, command, command_type, sender=config.AGENT_NAME)
         return f"ผู้ใช้ '{display_name}' (id: {uid}): {res}"
 
     return [os_exec, web_search, query_system,

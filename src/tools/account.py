@@ -112,7 +112,7 @@ def request_app_refresh(user_id: str) -> None:
         pass
 
 
-def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender: str = "hub",
+def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender: str | None = None,
                           wait_response: bool = True, timeout: float = 45.0) -> str:
     """ส่งคำสั่งไปแอปผ่าน MQTT แล้ว (ถ้า wait_response) รอผลกลับจากแอปบน users/{id}/hub_response
     ปิด loop การสื่อสาร 2 ทาง — ซินฝั่ง Hub จะได้รู้ว่าซินฝั่งแอปทำสำเร็จจริงไหม ไม่ใช่แค่ส่งออกไปลอย ๆ"""
@@ -122,6 +122,9 @@ def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender:
     import threading
     import paho.mqtt.client as mqtt
     import config
+
+    if sender is None:
+        sender = config.AGENT_NAME
 
     corr_id = f"hub-cmd-{int(time.time())}-{str(uuid.uuid4())[:8]}"
     payload = {
