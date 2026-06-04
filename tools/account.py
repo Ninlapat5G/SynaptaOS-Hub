@@ -98,37 +98,70 @@ def find_user_by_query(user_query: str) -> str | None:
     return best_match
 
 
-def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender: str = "hub") -> str:
+def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender: str = "hub",
+                          wait_response: bool = True, timeout: float = 45.0) -> str:
+    """ส่งคำสั่งไปแอปผ่าน MQTT แล้ว (ถ้า wait_response) รอผลกลับจากแอปบน users/{id}/hub_response
+    ปิด loop การสื่อสาร 2 ทาง — ซินฝั่ง Hub จะได้รู้ว่าซินฝั่งแอปทำสำเร็จจริงไหม ไม่ใช่แค่ส่งออกไปลอย ๆ"""
     import json
     import time
     import uuid
-    import paho.mqtt.publish as publish
+    import threading
+    import paho.mqtt.client as mqtt
     import config
-    
+
     corr_id = f"hub-cmd-{int(time.time())}-{str(uuid.uuid4())[:8]}"
     payload = {
         "corr_id": corr_id,
         "sender": sender,
         "type": command_type,
-        "payload": {
-            "text" if command_type == "chat" else "action_prompt": command
-        },
-        "timestamp": int(time.time())
+        "payload": {("text" if command_type == "chat" else "action_prompt"): command},
+        "timestamp": int(time.time()),
     }
-    
-    topic = f"users/{user_id}/hub_cmd"
-    full_topic = config.topic(topic)
-    tls = {"tls_version": 2} if config.MQTT_USE_TLS else None
-    
+    cmd_topic = config.topic(f"users/{user_id}/hub_cmd")
+    resp_topic = config.topic(f"users/{user_id}/hub_response")
+
+    result = {"ok": None, "detail": None}
+    done = threading.Event()
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+    def on_connect(c, u, flags, rc, props=None):
+        if wait_response:
+            c.subscribe(resp_topic, qos=1)
+        c.publish(cmd_topic, json.dumps(payload, ensure_ascii=False), qos=1)
+
+    def on_message(c, u, msg):
+        try:
+            data = json.loads(msg.payload.decode("utf-8"))
+        except Exception:
+            return
+        if data.get("corr_id") == corr_id:
+            result["ok"] = data.get("ok")
+            result["detail"] = data.get("detail")
+            done.set()
+
+    client.on_connect = on_connect
+    client.on_message = on_message
+    if config.MQTT_USE_TLS:
+        import ssl
+        client.tls_set(cert_reqs=ssl.CERT_NONE)
+
     try:
-        publish.single(
-            full_topic,
-            payload=json.dumps(payload, ensure_ascii=False),
-            hostname=config.MQTT_BROKER,
-            port=config.MQTT_PORT,
-            qos=1,
-            tls=tls,
-        )
-        return f"ส่งคำสั่งแบบ {command_type} ไปที่ {full_topic} สำเร็จ (corr_id: {corr_id})"
+        client.connect(config.MQTT_BROKER, config.MQTT_PORT, keepalive=30)
     except Exception as e:
-        return f"ล้มเหลว (ไม่สามารถส่งคำสั่งผ่าน MQTT: {e})"
+        return f"ล้มเหลว (เชื่อม MQTT ไม่ได้: {e})"
+
+    client.loop_start()
+    try:
+        if not wait_response:
+            time.sleep(0.3)  # เผื่อเวลาให้ publish ออกก่อนตัดการเชื่อมต่อ
+            return f"ส่งคำสั่งแบบ {command_type} ไปแล้ว (corr_id: {corr_id})"
+        got = done.wait(timeout)
+    finally:
+        client.loop_stop()
+        client.disconnect()
+
+    if not got:
+        return f"ส่งคำสั่งไปแล้วแต่แอปยังไม่ตอบกลับใน {int(timeout)} วินาที (อาจออฟไลน์หรือกำลังยุ่ง) — corr_id: {corr_id}"
+    status = "สำเร็จ" if result["ok"] else "ไม่สำเร็จ"
+    return f"แอปทำงานเสร็จแล้ว ({status}): {result['detail'] or '(ไม่มีรายละเอียด)'}"

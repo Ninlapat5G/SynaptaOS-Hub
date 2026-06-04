@@ -96,11 +96,20 @@ def is_registered(user_id: str) -> bool:
 
 
 def save_part(user_id: str, kind: str, data) -> None:
-    """เก็บข้อมูล 1 ส่วน (kd/scenes/routines/phone/profile) เป็นไฟล์แยก"""
+    """เก็บข้อมูล 1 ส่วน (kd/scenes/routines/phone/profile) เป็นไฟล์แยก
+    
+    สำหรับ profile: ผสานข้อมูลเข้ากับไฟล์เดิม (ไม่ทับ app_name/registered_at ที่ register_user ตั้งไว้)
+    """
     if kind not in PARTS:
         raise ValueError(f"unknown part: {kind}")
     with _lock:
-        _write_json(_user_dir(user_id) / f"{kind}.json", data)
+        path = _user_dir(user_id) / f"{kind}.json"
+        if kind == "profile":
+            # merge: เก็บ field เดิม (เช่น app_name, registered_at) แล้วทับด้วยข้อมูลใหม่
+            existing = _read_json(path) or {}
+            existing.update(data)
+            data = existing
+        _write_json(path, data)
         _update_registry(user_id)
         _notify(user_id, kind, data)
 

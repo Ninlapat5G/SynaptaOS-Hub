@@ -1,725 +1,637 @@
-// app.js
+/* app.js — SynaptaHub Admin (React + Tailwind, ไม่มี build step)
+   คอมไพล์ JSX ในเบราว์เซอร์ด้วย Babel standalone · ธีม Deep Glass เดียวกับฝั่งแอป */
 
-// คอนฟิกูเรชันและสถานะของแอปพลิเคชัน
-const state = {
-    token: localStorage.getItem("admin_token") || "",
-    currentTab: "tab-users",
-    currentUser: null,
-    currentPart: "profile",
-    users: {},
-    tools: []
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── token + ตัวช่วยเรียก API ───────────────────────────────────────────────
+let TOKEN = localStorage.getItem('admin_token') || '';
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers || {});
+  if (TOKEN) opts.headers['Authorization'] = 'Bearer ' + TOKEN;
+  const res = await fetch(path, opts);
+  if (res.status === 401) {
+    window.dispatchEvent(new Event('syn-unauth'));
+    throw new Error('unauthorized');
+  }
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error || ('HTTP ' + res.status));
+  }
+  return res.json();
+}
+
+const thDate = (sec) => sec ? new Date(sec * 1000).toLocaleString('th-TH') : 'ไม่ทราบ';
+
+// ── ไอคอน (inline SVG) ─────────────────────────────────────────────────────
+const Icon = ({ path, className = 'w-5 h-5' }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className}><path d={path} /></svg>
+);
+const ICONS = {
+  users: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+  agent: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z',
+  system: 'M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z',
+  settings: 'M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z',
+  refresh: 'M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
+  send: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z',
 };
 
-// การตรวจหาองค์ประกอบของ UI
-const DOM = {
-    tabs: document.querySelectorAll(".tab-btn"),
-    tabContents: document.querySelectorAll(".tab-content"),
-    loginModal: document.getElementById("login-modal"),
-    loginForm: document.getElementById("login-form"),
-    tokenInput: document.getElementById("admin-token-input"),
-    loginError: document.getElementById("login-error"),
-    btnLogout: document.getElementById("btn-logout"),
-    
-    // แท็บผู้ใช้งาน (Users)
-    usersContainer: document.getElementById("users-container"),
-    userDetailPanel: document.getElementById("user-detail-panel"),
-    userEmptyPanel: document.getElementById("user-empty-panel"),
-    currentUserTitle: document.getElementById("current-user-title"),
-    currentUserSubtitle: document.getElementById("current-user-subtitle"),
-    partBtns: document.querySelectorAll(".part-tab-btn"),
-    uiViewPanel: document.getElementById("ui-view-panel"),
-    editorFilenameLabel: document.getElementById("editor-filename-label"),
-    btnRefreshUsers: document.getElementById("btn-refresh-users"),
-
-    // แท็บเอเจนต์ (Agent)
-    agentUserSelect: document.getElementById("agent-user-select"),
-    chatMessagesBox: document.getElementById("chat-messages-box"),
-    agentForm: document.getElementById("agent-form"),
-    agentInputField: document.getElementById("agent-input-field"),
-    agentThinkingLoader: document.getElementById("agent-thinking-loader"),
-
-    // แท็บระบบหลังบ้าน (System)
-    systemInfoText: document.getElementById("system-info-text"),
-    toolsContainer: document.getElementById("tools-container"),
-
-    // แท็บตั้งค่าความปลอดภัย (Settings)
-    settingsForm: document.getElementById("settings-form"),
-    settingsOldToken: document.getElementById("settings-old-token"),
-    settingsNewAdminToken: document.getElementById("settings-new-admin-token"),
-    settingsNewMcpToken: document.getElementById("settings-new-mcp-token"),
-    settingsError: document.getElementById("settings-error"),
-    settingsSuccess: document.getElementById("settings-success")
+// ── ชิ้นส่วน UI ที่ใช้ซ้ำ ───────────────────────────────────────────────────
+const Card = ({ className = '', children }) => (
+  <div className={'glass rounded-xl2 ' + className}>{children}</div>
+);
+const Badge = ({ children, color = 'accent' }) => {
+  const map = {
+    accent: 'text-accent border-accent/40 bg-accent/10',
+    accent2: 'text-accent2 border-accent2/40 bg-accent2/10',
+    ok: 'text-ok border-ok/40 bg-ok/10',
+    dim: 'text-inkDim border-inkXdim/40 bg-white/5',
+  };
+  return <span className={'text-[11px] font-mono px-2 py-0.5 rounded-full border ' + (map[color] || map.accent)}>{children}</span>;
 };
+const Spinner = ({ text = 'กำลังโหลด...', danger }) => (
+  <div className={'flex items-center justify-center gap-2 py-10 text-sm ' + (danger ? 'text-danger' : 'text-inkDim')}>
+    {!danger && <span className="w-4 h-4 border-2 border-accent/40 border-t-accent rounded-full animate-spin" />}
+    {text}
+  </div>
+);
 
-// ── ระบบการสลับแท็บเมนูหลัก ──────────────────────────────────────────────────
-DOM.tabs.forEach(btn => {
-    btn.addEventListener("click", () => {
-        const tabId = btn.getAttribute("data-tab");
-        switchTab(tabId);
-    });
-});
+// ── หน้าเข้าสู่ระบบ ─────────────────────────────────────────────────────────
+function Login({ onSuccess }) {
+  const [val, setVal] = useState('');
+  const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-function switchTab(tabId) {
-    state.currentTab = tabId;
-    DOM.tabs.forEach(b => {
-        if (b.getAttribute("data-tab") === tabId) {
-            b.classList.add("active");
-        } else {
-            b.classList.remove("active");
-        }
-    });
-
-    DOM.tabContents.forEach(content => {
-        if (content.id === tabId) {
-            content.classList.add("active");
-        } else {
-            content.classList.remove("active");
-        }
-    });
-
-    // โหลดข้อมูลสำหรับแต่ละแท็บ
-    if (tabId === "tab-users") {
-        loadUsers();
-    } else if (tabId === "tab-agent") {
-        updateAgentUserDropdown();
-    } else if (tabId === "tab-system") {
-        loadSystemInfo();
-    } else if (tabId === "tab-settings") {
-        loadSettingsInfo();
-    }
-}
-
-// ── การตรวจหาและส่งข้อมูลผ่าน API (Fetch Wrapper) ──────────────────────────
-async function fetchAPI(url, options = {}) {
-    options.headers = options.headers || {};
-    if (state.token) {
-        options.headers["Authorization"] = `Bearer ${state.token}`;
-    }
-    
-    try {
-        const response = await fetch(url, options);
-        
-        if (response.status === 401) {
-            showLoginModal();
-            throw new Error("unauthorized");
-        }
-        
-        if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error || `HTTP error! status: ${response.status}`);
-        }
-        
-        return await response.json();
-    } catch (err) {
-        if (err.message !== "unauthorized") {
-            console.error("API Call failed:", err);
-        }
-        throw err;
-    }
-}
-
-// ── ระบบตรวจสอบสิทธิ์ (Authentication) ──────────────────────────────────────
-function showLoginModal() {
-    DOM.loginModal.style.display = "flex";
-    DOM.loginError.style.display = "none";
-}
-
-function hideLoginModal() {
-    DOM.loginModal.style.display = "none";
-    if (state.token) {
-        DOM.btnLogout.style.display = "block";
-    } else {
-        DOM.btnLogout.style.display = "none";
-    }
-    connectWebSocket();
-}
-
-DOM.loginForm.addEventListener("submit", async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const token = DOM.tokenInput.value.trim();
-    state.token = token;
-    
+    setBusy(true); setErr(false);
+    TOKEN = val.trim();
     try {
-        // ทดสอบดึงผู้ใช้งานเพื่อทดสอบว่าโทเค็นถูกต้องไหม
-        await fetchAPI("/admin/api/users");
-        localStorage.setItem("admin_token", token);
-        hideLoginModal();
-        switchTab(state.currentTab);
-    } catch (err) {
-        DOM.loginError.style.display = "block";
-        state.token = "";
-        localStorage.removeItem("admin_token");
-    }
-});
+      await api('/admin/api/users');
+      localStorage.setItem('admin_token', TOKEN);
+      onSuccess();
+    } catch (_) {
+      setErr(true); TOKEN = ''; localStorage.removeItem('admin_token');
+    } finally { setBusy(false); }
+  };
 
-DOM.btnLogout.addEventListener("click", () => {
-    state.token = "";
-    localStorage.removeItem("admin_token");
-    DOM.btnLogout.style.display = "none";
-    if (ws) {
-        try { ws.close(); } catch(e) {}
-        ws = null;
-    }
-    showLoginModal();
-});
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg0/80 backdrop-blur-sm p-5">
+      <Card className="w-full max-w-md p-8 fade-in">
+        <div className="flex flex-col items-center text-center gap-2 mb-6">
+          <span className="w-14 h-14 rounded-full glow-accent" style={{ background: 'linear-gradient(135deg,#00D4FF,#B44FFF)' }} />
+          <h2 className="text-xl font-semibold mt-2">เข้าสู่ระบบผู้ดูแล</h2>
+          <p className="text-sm text-inkDim">ระบุกุญแจความปลอดภัย (ADMIN_TOKEN) ของคุณ</p>
+        </div>
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <input type="password" autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+            placeholder="ป้อนกุญแจความปลอดภัย..."
+            className="w-full bg-bg1/70 border border-line rounded-xl2 px-4 py-3 outline-none focus:border-accent transition" />
+          {err && <div className="text-danger text-sm text-center">กุญแจไม่ถูกต้อง โปรดลองอีกครั้ง</div>}
+          <button disabled={busy} type="submit"
+            className="w-full py-3 rounded-xl2 font-semibold text-bg0 disabled:opacity-60 transition hover:brightness-110"
+            style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>
+            {busy ? 'กำลังตรวจสอบ...' : 'ยืนยันตัวตน'}
+          </button>
+        </form>
+      </Card>
+    </div>
+  );
+}
 
-// ── แท็บที่ 1: การจัดการผู้ใช้ (Users Tab) ───────────────────────────────────
-DOM.btnRefreshUsers.addEventListener("click", loadUsers);
+// ── ส่วนหัว + แท็บ ──────────────────────────────────────────────────────────
+const TABS = [
+  { id: 'users', label: 'ผู้ใช้งาน', icon: ICONS.users },
+  { id: 'agent', label: 'เอเจนต์', icon: ICONS.agent },
+  { id: 'system', label: 'ระบบหลังบ้าน', icon: ICONS.system },
+  { id: 'settings', label: 'ความปลอดภัย', icon: ICONS.settings },
+];
 
-async function loadUsers() {
-    DOM.usersContainer.innerHTML = '<div class="loading-spinner">กำลังดึงข้อมูลรายชื่อ...</div>';
+function Header({ tab, setTab, online, hasToken, onLogout }) {
+  return (
+    <header className="glass-soft sticky top-0 z-30 border-b border-line">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-full glow-accent shrink-0" style={{ background: 'linear-gradient(135deg,#00D4FF,#B44FFF)' }} />
+          <h1 className="text-lg font-semibold">SynaptaOS <span className="text-gradient font-bold">Hub</span></h1>
+          <Badge color="accent2">ADMIN</Badge>
+        </div>
+
+        <nav className="order-3 w-full md:order-2 md:w-auto md:flex-1 flex items-center gap-1.5 overflow-x-auto md:justify-center">
+          {TABS.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={'shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-xl2 text-sm font-medium transition '
+                + (tab === t.id ? 'bg-accent/15 text-accent' : 'text-inkDim hover:text-ink hover:bg-white/5')}>
+              <Icon path={t.icon} className="w-4 h-4" />
+              <span className="whitespace-nowrap">{t.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="order-2 md:order-3 ml-auto flex items-center gap-3">
+          <span className={'w-2.5 h-2.5 rounded-full ' + (online ? 'bg-ok pulse-online' : 'bg-inkXdim')} />
+          <span className="text-xs text-inkDim hidden sm:inline">{online ? 'Hub Online' : 'เชื่อมต่อใหม่...'}</span>
+          {hasToken && (
+            <button onClick={onLogout}
+              className="text-xs px-3 py-1.5 rounded-lg border border-line text-inkDim hover:text-ink hover:border-lineStrong transition">
+              ออกจากระบบ
+            </button>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// ── ตัวแสดงข้อมูลแต่ละส่วนของผู้ใช้ (profile / kd / scenes / routines / phone) ──
+function ProfileView({ d }) {
+  const fields = [
+    ['ชื่อผู้ใช้งาน (Display Name)', d.displayName],
+    ['ชื่อผู้ช่วย (Assistant)', d.assistantName],
+    ['เกี่ยวกับผู้ใช้ (Bio)', d.userBio],
+    ['ความจำระยะยาวของบอท', d.userMemory],
+    ['ลงทะเบียนเมื่อ', d.registered_at ? thDate(d.registered_at) : null],
+  ];
+  return (
+    <div className="grid gap-3 fade-in">
+      {fields.map(([label, val]) => (
+        <div key={label} className="glass-soft rounded-xl2 p-4">
+          <div className="text-[11px] uppercase tracking-wide text-accent mb-1">{label}</div>
+          <div className="text-sm text-ink whitespace-pre-wrap break-words">{val || '— ไม่มีข้อมูล —'}</div>
+        </div>
+      ))}
+      <div className="glass-soft rounded-xl2 p-4">
+        <div className="text-[11px] uppercase tracking-wide text-accent2 mb-1">System Prompt ของบอท</div>
+        <div className="text-[13px] font-mono text-inkDim whitespace-pre-wrap break-words">{d.systemPrompt || '— ไม่มีข้อมูล —'}</div>
+      </div>
+    </div>
+  );
+}
+
+const DEV_ICON = { lamp: '💡', bulb: '💡', sparkle: '✨', gauge: '📊', fan: '🌀', ac: '❄️', tv: '📺' };
+function KdView({ d }) {
+  if (!Array.isArray(d) || d.length === 0) return <Spinner text="ไม่มีรายการอุปกรณ์" />;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 fade-in">
+      {d.map((dev, i) => (
+        <div key={i} className="glass-soft rounded-xl2 p-4 flex items-center gap-3 hover:border-accent/40 transition">
+          <div className="w-11 h-11 rounded-xl2 bg-accent/10 flex items-center justify-center text-xl shrink-0">{DEV_ICON[dev.icon] || '🔌'}</div>
+          <div className="min-w-0">
+            <div className="font-medium truncate" title={dev.name}>{dev.name}</div>
+            <div className="text-xs text-inkDim truncate">{dev.room || '—'}</div>
+            <div className="mt-1"><Badge color="dim">{dev.type}</Badge></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ScenesView({ d }) {
+  if (!Array.isArray(d) || d.length === 0) return <Spinner text="ไม่มีสภาพแวดล้อม (Scenes)" />;
+  return (
+    <div className="grid gap-3 fade-in">
+      {d.map((sc, i) => (
+        <div key={i} className="glass-soft rounded-xl2 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-medium">✨ {sc.name}</div>
+            <Badge color="accent2">{sc.id}</Badge>
+          </div>
+          <div className="text-[11px] uppercase tracking-wide text-accent mb-2">คำสั่งอุปกรณ์</div>
+          <div className="flex flex-wrap gap-2">
+            {Array.isArray(sc.actions) && sc.actions.length > 0
+              ? sc.actions.map((a, j) => (
+                <span key={j} className="text-xs bg-bg1/60 border border-line rounded-lg px-2.5 py-1">
+                  <span className="text-inkDim">{a.deviceId}</span> <span className="text-accent font-mono">{a.value}</span>
+                </span>))
+              : <span className="text-xs text-inkXdim">(ไม่มีคำสั่ง)</span>}
+          </div>
+          {sc.prompt && <div className="text-xs mt-3"><span className="text-accent2 font-semibold">Prompt:</span> <span className="text-inkDim">{sc.prompt}</span></div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RoutinesView({ d }) {
+  if (!Array.isArray(d) || d.length === 0) return <Spinner text="ไม่มีกฎอัตโนมัติ (Routines)" />;
+  const actLabel = (a) => a.type === 'prompt' ? `💬 รัน Prompt: "${a.prompt}"`
+    : a.type === 'scene' ? `🎬 เรียกซีน: ${a.sceneId}` : '⚙️ ปรับค่าอุปกรณ์';
+  return (
+    <div className="grid gap-3 fade-in">
+      {d.map((rt, i) => (
+        <div key={i} className="glass-soft rounded-xl2 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-medium">🤖 {rt.name}</div>
+            {rt.enabled ? <Badge color="ok">เปิดใช้งาน</Badge> : <Badge color="dim">ปิดใช้งาน</Badge>}
+          </div>
+          <div className="text-[11px] uppercase tracking-wide text-accent mb-2">เมื่อตรงเงื่อนไข ({rt.logic || 'AND'})</div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {Array.isArray(rt.conditions) && rt.conditions.length > 0
+              ? rt.conditions.map((c, j) => (
+                <span key={j} className="text-xs bg-bg1/60 border border-line rounded-lg px-2.5 py-1">
+                  <span className="text-inkDim">{c.source}</span> <span className="text-accent font-mono">{c.op} {c.value}</span>
+                </span>))
+              : <span className="text-xs text-inkXdim">(ไม่มีเงื่อนไข)</span>}
+          </div>
+          <div className="bg-white/[0.02] rounded-xl2 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-accent2 mb-2">ระบบจะทำงาน</div>
+            {Array.isArray(rt.actions) && rt.actions.length > 0
+              ? rt.actions.map((a, j) => <div key={j} className="text-[13px] mb-1">{actLabel(a)}</div>)
+              : <span className="text-xs text-inkXdim">(ไม่มีผลลัพธ์)</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PhoneView({ d }) {
+  const lvl = d && d.level !== undefined ? d.level : 0;
+  return (
+    <div className="fade-in flex flex-col sm:flex-row items-center gap-6 glass-soft rounded-xl2 p-6">
+      <div className="battery-ring w-28 h-28 rounded-full flex items-center justify-center shrink-0" style={{ '--p': lvl }}>
+        <div className="w-20 h-20 rounded-full bg-bg1 flex items-center justify-center text-xl font-mono font-semibold text-accent">{lvl}%</div>
+      </div>
+      <div className="text-center sm:text-left">
+        <div className="text-lg font-medium">{(d && d.text) || `แบตเตอรี่ ${lvl}%`}</div>
+        <div className="text-sm text-inkDim mt-1">{d && d.charging ? 'กำลังชาร์จไฟ ⚡' : 'ไม่ได้ชาร์จไฟ'}</div>
+      </div>
+    </div>
+  );
+}
+
+const PART_LABELS = { profile: 'ข้อมูลส่วนตัว', kd: 'อุปกรณ์ (KD)', scenes: 'Scenes', routines: 'Routines', phone: 'มือถือ' };
+const PART_KEYS = ['profile', 'kd', 'scenes', 'routines', 'phone'];
+
+function PartView({ part, data }) {
+  if (data === null || data === undefined) return <Spinner text="ไม่มีข้อมูลสำหรับส่วนนี้" />;
+  if (part === 'profile') return <ProfileView d={data} />;
+  if (part === 'kd') return <KdView d={data} />;
+  if (part === 'scenes') return <ScenesView d={data} />;
+  if (part === 'routines') return <RoutinesView d={data} />;
+  if (part === 'phone') return <PhoneView d={data} />;
+  return null;
+}
+
+// ── แท็บ 1: ผู้ใช้งาน ───────────────────────────────────────────────────────
+function UsersTab({ users, reloadUsers, liveUpdate }) {
+  const [sel, setSel] = useState(null);
+  const [part, setPart] = useState('profile');
+  const [data, setData] = useState(undefined);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const loadPart = useCallback(async (uid, p) => {
+    if (!uid) return;
+    setLoading(true); setErr(''); setData(undefined);
     try {
-        const users = await fetchAPI("/admin/api/users");
-        state.users = users;
-        renderUsersList();
-    } catch (err) {
-        if (err.message !== "unauthorized") {
-            DOM.usersContainer.innerHTML = `<div class="loading-spinner" style="color:var(--danger-color)">ดึงข้อมูลล้มเหลว: ${err.message}</div>`;
-        }
+      const d = await api(`/admin/api/users/${uid}/${p}`);
+      setData(d);
+    } catch (e) {
+      if (e.message !== 'unauthorized') setErr(e.message);
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { if (sel) loadPart(sel, part); }, [sel, part, loadPart]);
+
+  // อัปเดตสด: ถ้า ws ส่งข้อมูลของ user/part ที่เปิดอยู่พอดี → รีเฟรชทันที
+  useEffect(() => {
+    if (liveUpdate && liveUpdate.user_id === sel && liveUpdate.kind === part) {
+      setData(liveUpdate.data);
     }
+  }, [liveUpdate, sel, part]);
+
+  const ids = Object.keys(users);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+      {/* รายชื่อผู้ใช้ */}
+      <Card className="p-4 h-fit">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold">รายชื่อผู้ใช้ ({ids.length})</h2>
+          <button onClick={reloadUsers} title="โหลดใหม่"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-inkDim hover:text-accent hover:bg-white/5 transition">
+            <Icon path={ICONS.refresh} className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex flex-col gap-2 max-h-[70vh] overflow-y-auto">
+          {ids.length === 0 && <Spinner text="ไม่พบผู้ใช้ในระบบ" />}
+          {ids.map((uid) => (
+            <button key={uid} onClick={() => setSel(uid)}
+              className={'text-left p-3 rounded-xl2 border transition '
+                + (sel === uid ? 'border-accent/50 bg-accent/10' : 'border-line glass-soft hover:border-lineStrong')}>
+              <div className="font-medium text-sm truncate font-mono">{uid}</div>
+              <div className="text-xs text-inkDim truncate mt-0.5">{users[uid].app_name || 'แอปนิรนาม'} • {thDate(users[uid].last_seen)}</div>
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      {/* รายละเอียด */}
+      {!sel ? (
+        <Card className="p-10 flex flex-col items-center justify-center text-center text-inkDim min-h-[40vh]">
+          <Icon path={ICONS.users} className="w-12 h-12 mb-3 text-inkXdim" />
+          <p>เลือกผู้ใช้จากรายการเพื่อดูข้อมูลระบบ</p>
+        </Card>
+      ) : (
+        <Card className="p-4 sm:p-5">
+          <div className="mb-4">
+            <h3 className="font-semibold font-mono text-sm break-all">{sel}</h3>
+            <p className="text-xs text-inkDim mt-0.5">แอป: {users[sel] && users[sel].app_name || '—'} • ล่าสุด: {thDate(users[sel] && users[sel].last_seen)}</p>
+          </div>
+          <div className="flex items-center gap-1.5 overflow-x-auto border-b border-line pb-3 mb-4">
+            {PART_KEYS.map((p) => (
+              <button key={p} onClick={() => setPart(p)}
+                className={'shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition '
+                  + (part === p ? 'bg-accent/15 text-accent' : 'text-inkDim hover:text-ink hover:bg-white/5')}>
+                {PART_LABELS[p]}
+              </button>
+            ))}
+          </div>
+          {loading ? <Spinner /> : err ? <Spinner text={'โหลดล้มเหลว: ' + err} danger /> : <PartView part={part} data={data} />}
+        </Card>
+      )}
+    </div>
+  );
 }
 
-function renderUsersList() {
-    const userIds = Object.keys(state.users);
-    if (userIds.length === 0) {
-        DOM.usersContainer.innerHTML = '<div class="loading-spinner">ไม่พบรายชื่อผู้ใช้งานในระบบ</div>';
-        return;
-    }
+// ── แท็บ 2: เอเจนต์ ─────────────────────────────────────────────────────────
+function AgentTab({ users }) {
+  const [msgs, setMsgs] = useState([{ role: 'sys', text: 'ระบบพร้อมแล้ว พิมพ์คำสั่งให้เอเจนต์ทำงานได้เลย เช่น "เปิดเพลง lofi" หรือ "ดู disk ที่เหลือ"' }]);
+  const [input, setInput] = useState('');
+  const [ctxUser, setCtxUser] = useState('');
+  const [busy, setBusy] = useState(false);
+  const boxRef = useRef(null);
 
-    DOM.usersContainer.innerHTML = "";
-    userIds.forEach(uid => {
-        const user = state.users[uid];
-        const lastSeenDate = user.last_seen ? new Date(user.last_seen * 1000).toLocaleString("th-TH") : "ไม่ทราบข้อมูล";
-        
-        const item = document.createElement("div");
-        item.className = "user-item";
-        if (state.currentUser === uid) {
-            item.classList.add("active");
-        }
-        
-        item.innerHTML = `
-            <div class="user-item-name">${uid}</div>
-            <div class="user-item-detail">${user.app_name || "แอปนิรนาม"} • ล่าสุด: ${lastSeenDate}</div>
-        `;
-        
-        item.addEventListener("click", () => {
-            selectUser(uid);
-        });
-        
-        DOM.usersContainer.appendChild(item);
-    });
-}
+  useEffect(() => { if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight; }, [msgs, busy]);
 
-function selectUser(uid) {
-    state.currentUser = uid;
-    
-    // อัปเดตการเลือกคลาส active บนรายการ
-    document.querySelectorAll(".user-item").forEach(item => {
-        const name = item.querySelector(".user-item-name").innerText;
-        if (name === uid) {
-            item.classList.add("active");
-        } else {
-            item.classList.remove("active");
-        }
-    });
-
-    const user = state.users[uid];
-    DOM.currentUserTitle.innerText = `รหัสผู้ใช้งาน: ${uid}`;
-    DOM.currentUserSubtitle.innerText = `ชื่อแอปพลิเคชัน: ${user.app_name || "ไม่มี"} | เชื่อมต่อล่าสุด: ${user.last_seen ? new Date(user.last_seen * 1000).toLocaleString("th-TH") : "ไม่มี"}`;
-    
-    DOM.userEmptyPanel.style.display = "none";
-    DOM.userDetailPanel.style.display = "flex";
-    
-    // ไปยังส่วนข้อมูลย่อยที่เลือกอยู่
-    selectPart(state.currentPart);
-}
-
-// การเลือกแท็บข้อมูลส่วนต่าง ๆ (Profile, KD, Scenes, Routines, Phone)
-DOM.partBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-        const part = btn.getAttribute("data-part");
-        selectPart(part);
-    });
-});
-
-function selectPart(part) {
-    state.currentPart = part;
-    DOM.partBtns.forEach(b => {
-        if (b.getAttribute("data-part") === part) {
-            b.classList.add("active");
-        } else {
-            b.classList.remove("active");
-        }
-    });
-
-    const labels = {
-        profile: "ข้อมูลส่วนตัว (Profile)",
-        kd: "รายการอุปกรณ์ควบคุม (Devices)",
-        scenes: "สภาพแวดล้อมที่ตั้งไว้ (Scenes)",
-        routines: "กฎอัตโนมัติ (Routines)",
-        phone: "สถานะโทรศัพท์มือถือ (Phone)"
-    };
-    DOM.editorFilenameLabel.innerText = labels[part] || part;
-    loadUserPart();
-}
-
-async function loadUserPart() {
-    if (!state.currentUser) return;
-    DOM.uiViewPanel.innerHTML = '<div class="loading-spinner">กำลังดึงข้อมูล...</div>';
-    
-    try {
-        const data = await fetchAPI(`/admin/api/users/${state.currentUser}/${state.currentPart}`);
-        renderPartUI(state.currentPart, data);
-    } catch (err) {
-        if (err.message !== "unauthorized") {
-            DOM.uiViewPanel.innerHTML = `<div class="loading-spinner" style="color:var(--danger-color)">เกิดข้อผิดพลาดในการโหลดข้อมูล: ${err.message}</div>`;
-        }
-    }
-}
-
-function renderPartUI(part, data) {
-    if (!data) {
-        DOM.uiViewPanel.innerHTML = '<div class="loading-spinner">ไม่มีข้อมูลสำหรับส่วนนี้</div>';
-        return;
-    }
-
-    let html = "";
-    if (part === "profile") {
-        const displayName = data.displayName || "(ยังไม่ได้ซิงก์ / ไม่มีชื่อ)";
-        const assistantName = data.assistantName || "(ยังไม่ได้ซิงก์ / ไม่มีชื่อ)";
-        const userBio = data.userBio || "(ไม่มีข้อมูล)";
-        const userMemory = data.userMemory || "(ไม่มีข้อมูล)";
-        const systemPrompt = data.systemPrompt || "(ไม่มีข้อมูล)";
-        const registeredAt = data.registered_at ? new Date(data.registered_at * 1000).toLocaleString("th-TH") : "ไม่ทราบ";
-
-        html = `
-            <div class="profile-card">
-                <div class="profile-field">
-                    <div class="profile-label">ชื่อผู้ใช้งาน (Display Name)</div>
-                    <div class="profile-value">${displayName}</div>
-                </div>
-                <div class="profile-field">
-                    <div class="profile-label">ชื่อบอทผู้ช่วย (Assistant Name)</div>
-                    <div class="profile-value">${assistantName}</div>
-                </div>
-                <div class="profile-field">
-                    <div class="profile-label">ข้อมูลเกี่ยวกับผู้ใช้ (Bio)</div>
-                    <div class="profile-value">${userBio}</div>
-                </div>
-                <div class="profile-field">
-                    <div class="profile-label">ความจำระยะยาวของบอท (Long-term Memory)</div>
-                    <div class="profile-value">${userMemory}</div>
-                </div>
-                <div class="profile-field">
-                    <div class="profile-label">System Prompt ของบอทส่วนบุคคล</div>
-                    <div class="profile-value" style="font-family: monospace; font-size: 13.5px;">${systemPrompt}</div>
-                </div>
-                <div class="profile-field">
-                    <div class="profile-label">ลงทะเบียนเมื่อ (Registered At)</div>
-                    <div class="profile-value">${registeredAt}</div>
-                </div>
-            </div>
-        `;
-    } else if (part === "kd") {
-        if (!Array.isArray(data) || data.length === 0) {
-            html = '<div class="loading-spinner">ไม่มีรายการอุปกรณ์ควบคุม</div>';
-        } else {
-            html = '<div class="device-grid">';
-            data.forEach(dev => {
-                let iconClass = "🔌";
-                if (dev.icon === "lamp") iconClass = "💡";
-                else if (dev.icon === "sparkle") iconClass = "✨";
-                else if (dev.icon === "gauge") iconClass = "📊";
-                else if (dev.icon === "bulb") iconClass = "💡";
-
-                html += `
-                    <div class="device-card-ui">
-                        <div class="device-icon-wrapper">${iconClass}</div>
-                        <div class="device-info-wrapper">
-                            <div class="device-name-ui" title="${dev.name}">${dev.name}</div>
-                            <div class="device-room-ui">${dev.room}</div>
-                            <div class="device-badge-ui">${dev.type}</div>
-                        </div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-        }
-    } else if (part === "scenes") {
-        if (!Array.isArray(data) || data.length === 0) {
-            html = '<div class="loading-spinner">ไม่มีรายการสภาพแวดล้อม (Scenes)</div>';
-        } else {
-            html = '<div class="scene-list-ui">';
-            data.forEach(sc => {
-                const actionsHtml = Array.isArray(sc.actions) && sc.actions.length > 0
-                    ? sc.actions.map(act => `
-                        <div class="scene-action-item">
-                            <span class="action-device">${act.deviceId}</span>
-                            <span class="action-val">${act.value}</span>
-                        </div>
-                    `).join('')
-                    : '<div style="color:var(--text-secondary); font-size: 12px;">(ไม่มีคำสั่งทำงานในซีนนี้)</div>';
-
-                html += `
-                    <div class="scene-card-ui">
-                        <div class="scene-header-ui">
-                            <div class="scene-title-ui">✨ ${sc.name}</div>
-                            <span class="badge">${sc.id}</span>
-                        </div>
-                        <div class="scene-actions-ui">
-                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--accent-primary); margin-bottom: 6px;">คำสั่งอุปกรณ์:</div>
-                            ${actionsHtml}
-                        </div>
-                        ${sc.prompt ? `
-                        <div style="font-size: 12px; margin-top: 4px;">
-                            <span style="color: var(--accent-secondary); font-weight: 600;">Prompt สั่งการ:</span> ${sc.prompt}
-                        </div>
-                        ` : ''}
-                    </div>
-                `;
-            });
-            html += '</div>';
-        }
-    } else if (part === "routines") {
-        if (!Array.isArray(data) || data.length === 0) {
-            html = '<div class="loading-spinner">ไม่มีกฎการทำงานอัตโนมัติ (Routines)</div>';
-        } else {
-            html = '<div class="routine-list-ui">';
-            data.forEach(rt => {
-                const statusBadge = rt.enabled 
-                    ? '<span class="badge" style="color:var(--success-color); border-color:var(--success-color); background:rgba(0,230,118,0.1)">เปิดใช้งาน</span>'
-                    : '<span class="badge" style="color:var(--text-secondary); border-color:var(--text-secondary); background:rgba(255,255,255,0.05)">ปิดใช้งาน</span>';
-
-                const condsHtml = Array.isArray(rt.conditions) && rt.conditions.length > 0
-                    ? rt.conditions.map(cond => `
-                        <div class="routine-cond-item">
-                            <span class="cond-source">${cond.source}</span>
-                            <span class="cond-val">${cond.op} ${cond.value}</span>
-                        </div>
-                    `).join('')
-                    : '<div style="color:var(--text-secondary); font-size: 12px;">(ไม่มีเงื่อนไข)</div>';
-
-                const actsHtml = Array.isArray(rt.actions) && rt.actions.length > 0
-                    ? rt.actions.map(act => {
-                        if (act.type === "prompt") {
-                            return `<div style="font-size: 13px; color: var(--text-primary); margin-bottom: 4px;">💬 รัน Prompt: "${act.prompt}"</div>`;
-                        } else if (act.type === "scene") {
-                            return `<div style="font-size: 13px; color: var(--text-primary); margin-bottom: 4px;">🎬 เรียกซีรี่/ซีน: ID ${act.sceneId}</div>`;
-                        }
-                        return `<div style="font-size: 13px; color: var(--text-primary); margin-bottom: 4px;">⚙️ ปรับค่าอุปกรณ์</div>`;
-                    }).join('')
-                    : '<div style="color:var(--text-secondary); font-size: 12px;">(ไม่มีผลลัพธ์การทำงาน)</div>';
-
-                html += `
-                    <div class="routine-card-ui">
-                        <div class="routine-header-ui">
-                            <div class="routine-title-ui">🤖 ${rt.name}</div>
-                            ${statusBadge}
-                        </div>
-                        <div class="routine-actions-ui">
-                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--accent-primary); margin-bottom: 6px;">เมื่อตรงเงื่อนไข (${rt.logic || "AND"}):</div>
-                            ${condsHtml}
-                        </div>
-                        <div style="background: rgba(255,255,255,0.02); border-radius: 8px; padding: 12px;">
-                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--accent-secondary); margin-bottom: 6px;">ระบบจะทำงานดังนี้:</div>
-                            ${actsHtml}
-                        </div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-        }
-    } else if (part === "phone") {
-        const batteryPercent = data.level !== undefined ? data.level : 0;
-        const chargingText = data.charging ? "กำลังชาร์จไฟ ⚡" : "ไม่ได้ชาร์จไฟ";
-        const text = data.text || `แบตเตอรี่: ${batteryPercent}%`;
-
-        html = `
-            <div class="phone-card-ui">
-                <div class="phone-battery-radial" style="--battery-percent: ${batteryPercent}">
-                    <span class="phone-battery-text">${batteryPercent}%</span>
-                </div>
-                <div class="phone-details-ui">
-                    <div class="phone-status-lbl">${text}</div>
-                    <div class="phone-status-sub">สถานะพลังงาน: ${chargingText}</div>
-                </div>
-            </div>
-        `;
-    }
-
-    DOM.uiViewPanel.innerHTML = html;
-}
-
-// ── แท็บที่ 2: การพูดคุยกับเอเจนต์ (Agent Tab) ───────────────────────────────
-function updateAgentUserDropdown() {
-    const prevVal = DOM.agentUserSelect.value;
-    DOM.agentUserSelect.innerHTML = '<option value="">-- ไม่ใช้บริบทของผู้ใช้งาน --</option>';
-    
-    Object.keys(state.users).forEach(uid => {
-        const opt = document.createElement("option");
-        opt.value = uid;
-        opt.innerText = `${uid} (${state.users[uid].app_name || "แอปนิรนาม"})`;
-        DOM.agentUserSelect.appendChild(opt);
-    });
-
-    DOM.agentUserSelect.value = prevVal;
-}
-
-DOM.agentForm.addEventListener("submit", async (e) => {
+  const send = async (e) => {
     e.preventDefault();
-    const taskText = DOM.agentInputField.value.trim();
-    if (!taskText) return;
-    
-    // ลบข้อความที่กรอกออก
-    DOM.agentInputField.value = "";
-    
-    // แสดงข้อความในหน้าต่างแชต
-    appendChatMessage(taskText, "user-msg");
-    
-    // แสดงสัญลักษณ์การโหลดคิดของเอเจนต์
-    DOM.agentThinkingLoader.style.display = "flex";
-    DOM.agentInputField.disabled = true;
-    DOM.agentForm.querySelector("button").disabled = true;
-    
-    const selectedUser = DOM.agentUserSelect.value;
-    
+    const task = input.trim();
+    if (!task || busy) return;
+    setInput('');
+    setMsgs((m) => [...m, { role: 'user', text: task }]);
+    setBusy(true);
     try {
-        const response = await fetchAPI("/admin/api/agent", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                task: taskText,
-                user_id: selectedUser || null
-            })
-        });
-        
-        appendChatMessage(response.reply || "[ไม่มีการตอบกลับจากระบบ]", "agent-msg");
+      const r = await api('/admin/api/agent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, user_id: ctxUser || null }),
+      });
+      setMsgs((m) => [...m, { role: 'agent', text: r.reply || '[ไม่มีการตอบกลับ]' }]);
     } catch (err) {
-        if (err.message !== "unauthorized") {
-            appendChatMessage(`เกิดข้อผิดพลาดในการรันสมองกล: ${err.message}`, "system-msg");
-        }
-    } finally {
-        DOM.agentThinkingLoader.style.display = "none";
-        DOM.agentInputField.disabled = false;
-        DOM.agentForm.querySelector("button").disabled = false;
-        DOM.agentInputField.focus();
-    }
-});
+      if (err.message !== 'unauthorized') setMsgs((m) => [...m, { role: 'sys', text: 'เกิดข้อผิดพลาด: ' + err.message }]);
+    } finally { setBusy(false); }
+  };
 
-function appendChatMessage(text, typeClass) {
-    const msg = document.createElement("div");
-    msg.className = `message ${typeClass}`;
-    
-    // ป้องกันการแฮ็กจากการแทรก HTML (XSS)
-    if (typeClass === "system-msg") {
-        msg.innerText = text;
-    } else {
-        msg.innerText = text;
-    }
-    
-    DOM.chatMessagesBox.appendChild(msg);
-    DOM.chatMessagesBox.scrollTop = DOM.chatMessagesBox.scrollHeight;
+  const bubble = (m, i) => {
+    if (m.role === 'sys') return <div key={i} className="mx-auto text-center text-xs text-inkDim bg-white/5 rounded-xl2 px-4 py-2 max-w-lg">{m.text}</div>;
+    const me = m.role === 'user';
+    return (
+      <div key={i} className={'max-w-[85%] sm:max-w-[75%] px-4 py-2.5 rounded-xl2 text-sm whitespace-pre-wrap break-words '
+        + (me ? 'self-end text-bg0 font-medium' : 'self-start glass-soft')}
+        style={me ? { background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' } : {}}>
+        {m.text}
+      </div>
+    );
+  };
+
+  return (
+    <Card className="p-4 sm:p-5 flex flex-col h-[76vh]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
+        <h2 className="font-semibold">สั่งการเอเจนต์ (Agent Shell)</h2>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-inkDim whitespace-nowrap">บริบทผู้ใช้:</span>
+          <select value={ctxUser} onChange={(e) => setCtxUser(e.target.value)}
+            className="bg-bg1/70 border border-line rounded-lg px-2 py-1.5 outline-none focus:border-accent max-w-[60vw] sm:max-w-xs">
+            <option value="">— ไม่ใช้บริบท —</option>
+            {Object.keys(users).map((uid) => <option key={uid} value={uid}>{uid} ({users[uid].app_name || 'แอป'})</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div ref={boxRef} className="flex-1 overflow-y-auto flex flex-col gap-3 py-4">
+        {msgs.map(bubble)}
+        {busy && (
+          <div className="self-start glass-soft rounded-xl2 px-4 py-3 flex items-center gap-1.5 text-sm text-inkDim">
+            <span className="think-dot w-2 h-2 rounded-full bg-accent" />
+            <span className="think-dot w-2 h-2 rounded-full bg-accent" />
+            <span className="think-dot w-2 h-2 rounded-full bg-accent" />
+            <span className="ml-2">เอเจนต์กำลังคิด...</span>
+          </div>
+        )}
+      </div>
+
+      <form onSubmit={send} className="flex items-center gap-2 pt-3 border-t border-line">
+        <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy}
+          placeholder="พิมพ์สิ่งที่ต้องการให้ระบบทำ..."
+          className="flex-1 bg-bg1/70 border border-line rounded-xl2 px-4 py-3 outline-none focus:border-accent transition disabled:opacity-60" />
+        <button type="submit" disabled={busy}
+          className="px-4 py-3 rounded-xl2 font-semibold text-bg0 disabled:opacity-60 transition hover:brightness-110 flex items-center gap-2"
+          style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>
+          <Icon path={ICONS.send} className="w-4 h-4" /><span className="hidden sm:inline">ส่ง</span>
+        </button>
+      </form>
+    </Card>
+  );
 }
 
-// ── แท็บที่ 3: ระบบหลังบ้าน (System Tab) ─────────────────────────────────────
-async function loadSystemInfo() {
-    DOM.systemInfoText.innerText = "กำลังประมวลผลข้อมูลของตัวเครื่อง...";
-    DOM.toolsContainer.innerHTML = '<div class="loading-spinner">กำลังโหลดอุปกรณ์เครื่องมือ...</div>';
-    
+// ── แท็บ 3: ระบบหลังบ้าน ────────────────────────────────────────────────────
+function SystemTab() {
+  const [info, setInfo] = useState('');
+  const [tools, setTools] = useState(null);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    setErr(''); setInfo(''); setTools(null);
     try {
-        const systemData = await fetchAPI("/admin/api/system");
-        
-        // 1. โชว์ System Info
-        DOM.systemInfoText.innerText = systemData.system_info;
-        
-        // 2. โชว์รายชื่อเครื่องมือที่มี
-        DOM.toolsContainer.innerHTML = "";
-        if (systemData.tools.length === 0) {
-            DOM.toolsContainer.innerHTML = '<div class="loading-spinner">ไม่พบการเรียกใช้งานเครื่องมือภายนอกในขณะนี้</div>';
-            return;
-        }
-        
-        systemData.tools.forEach(tool => {
-            const card = document.createElement("div");
-            card.className = "tool-card";
-            card.innerHTML = `
-                <div class="tool-name">${tool.name}</div>
-                <div class="tool-desc">${tool.description || "ไม่มีคำอธิบายเพิ่มเติม"}</div>
-            `;
-            DOM.toolsContainer.appendChild(card);
-        });
-    } catch (err) {
-        if (err.message !== "unauthorized") {
-            DOM.systemInfoText.innerText = `โหลดข้อมูลล้มเหลว: ${err.message}`;
-            DOM.toolsContainer.innerHTML = `<div class="loading-spinner" style="color:var(--danger-color)">ดึงข้อมูลเครื่องมือล้มเหลว: ${err.message}</div>`;
-        }
-    }
+      const d = await api('/admin/api/system');
+      setInfo(d.system_info || ''); setTools(d.tools || []);
+    } catch (e) { if (e.message !== 'unauthorized') setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold">ข้อมูลเครื่อง</h2>
+          <button onClick={load} className="w-8 h-8 flex items-center justify-center rounded-lg text-inkDim hover:text-accent hover:bg-white/5 transition">
+            <Icon path={ICONS.refresh} className="w-4 h-4" />
+          </button>
+        </div>
+        {err ? <Spinner text={'โหลดล้มเหลว: ' + err} danger />
+          : !info ? <Spinner />
+            : <pre className="text-[13px] font-mono text-inkDim whitespace-pre-wrap break-words bg-bg1/50 rounded-xl2 p-4 max-h-[70vh] overflow-auto">{info}</pre>}
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-semibold mb-3">เครื่องมือที่เปิดใช้ (MCP Tools) {tools && <span className="text-inkDim font-normal">· {tools.length}</span>}</h2>
+        {tools === null ? <Spinner /> : tools.length === 0 ? <Spinner text="ไม่พบเครื่องมือ" />
+          : <div className="grid sm:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
+            {tools.map((t, i) => (
+              <div key={i} className="glass-soft rounded-xl2 p-3.5 hover:border-accent/40 transition">
+                <div className="font-mono text-sm text-accent break-all">{t.name}</div>
+                <div className="text-xs text-inkDim mt-1 line-clamp-3">{t.description || 'ไม่มีคำอธิบาย'}</div>
+              </div>
+            ))}
+          </div>}
+      </Card>
+    </div>
+  );
 }
 
-// ── แท็บที่ 4: การตั้งค่ารหัสผ่านความปลอดภัย (Settings Tab) ──────────────────────
-async function loadSettingsInfo() {
-    DOM.settingsError.style.display = "none";
-    DOM.settingsSuccess.style.display = "none";
-    DOM.settingsOldToken.value = "";
-    DOM.settingsNewAdminToken.value = "";
-    DOM.settingsNewMcpToken.value = "กำลังโหลดข้อมูล...";
-    DOM.settingsNewMcpToken.disabled = true;
-    
+// ── แท็บ 4: ความปลอดภัย ─────────────────────────────────────────────────────
+function SettingsTab({ onTokenSaved }) {
+  const [adminSet, setAdminSet] = useState(false);
+  const [oldTok, setOldTok] = useState('');
+  const [newAdmin, setNewAdmin] = useState('');
+  const [mcp, setMcp] = useState('');
+  const [msg, setMsg] = useState(null); // {ok, text}
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setMsg(null);
     try {
-        const passwordsData = await fetchAPI("/admin/api/settings/passwords");
-        DOM.settingsNewMcpToken.disabled = false;
-        DOM.settingsNewMcpToken.value = passwordsData.mcp_token || "";
-        
-        if (!passwordsData.admin_token_set) {
-            DOM.settingsOldToken.placeholder = "ไม่มีการตั้งรหัสผ่านเดิมไว้ (เว้นว่างไว้ได้เลย)...";
-            DOM.settingsOldToken.disabled = true;
-        } else {
-            DOM.settingsOldToken.placeholder = "ระบุรหัสผ่านผู้ดูแลระบบปัจจุบันเพื่อยืนยัน...";
-            DOM.settingsOldToken.disabled = false;
-        }
+      const d = await api('/admin/api/settings/passwords');
+      setAdminSet(!!d.admin_token_set); setMcp(d.mcp_token || '');
+    } catch (e) { if (e.message !== 'unauthorized') setMsg({ ok: false, text: e.message }); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true); setMsg(null);
+    try {
+      await api('/admin/api/settings/passwords', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_admin_token: oldTok, new_admin_token: newAdmin.trim(), new_mcp_token: mcp.trim() }),
+      });
+      TOKEN = newAdmin.trim();
+      if (TOKEN) localStorage.setItem('admin_token', TOKEN); else localStorage.removeItem('admin_token');
+      onTokenSaved && onTokenSaved();
+      setMsg({ ok: true, text: '✓ บันทึกเรียบร้อยแล้ว' });
+      setOldTok(''); setNewAdmin('');
+      setTimeout(load, 800);
     } catch (err) {
-        if (err.message !== "unauthorized") {
-            DOM.settingsNewMcpToken.value = "โหลดข้อมูลล้มเหลว";
-            DOM.settingsError.innerText = `เกิดข้อผิดพลาด: ${err.message}`;
-            DOM.settingsError.style.display = "block";
-        }
-    }
+      if (err.message !== 'unauthorized') {
+        setMsg({ ok: false, text: err.message === 'incorrect old password' ? 'รหัสผ่านเดิมไม่ถูกต้อง' : 'บันทึกล้มเหลว: ' + err.message });
+      }
+    } finally { setBusy(false); }
+  };
+
+  const field = 'w-full bg-bg1/70 border border-line rounded-xl2 px-4 py-3 outline-none focus:border-accent transition';
+  return (
+    <div className="flex justify-center">
+      <Card className="w-full max-w-lg p-6 sm:p-8">
+        <h2 className="font-semibold text-center mb-6">ตั้งค่ากุญแจความปลอดภัย</h2>
+        <form onSubmit={save} className="flex flex-col gap-4">
+          <div>
+            <label className="block text-sm text-inkDim mb-2">รหัสผ่านผู้ดูแลเดิม (ยืนยันตัวตน)</label>
+            <input type="password" value={oldTok} onChange={(e) => setOldTok(e.target.value)} disabled={!adminSet}
+              placeholder={adminSet ? 'ระบุรหัสเดิมเพื่อยืนยัน...' : 'ยังไม่เคยตั้งรหัส (เว้นว่างได้)'} className={field + (adminSet ? '' : ' opacity-50')} />
+          </div>
+          <div className="border-t border-line pt-4">
+            <label className="block text-sm text-inkDim mb-2">รหัสผ่านผู้ดูแลใหม่ (ADMIN_TOKEN)</label>
+            <input type="password" value={newAdmin} onChange={(e) => setNewAdmin(e.target.value)}
+              placeholder="เว้นว่าง = เข้าได้โดยไม่ต้องใช้รหัส" className={field} />
+          </div>
+          <div>
+            <label className="block text-sm text-inkDim mb-2">รหัสสำหรับแอปมือถือ (MCP_TOKEN)</label>
+            <input type="text" value={mcp} onChange={(e) => setMcp(e.target.value)}
+              placeholder="เว้นว่าง = ไม่เปิดใช้กุญแจ" className={field + ' font-mono'} />
+          </div>
+          {msg && <div className={'text-sm text-center ' + (msg.ok ? 'text-ok' : 'text-danger')}>{msg.text}</div>}
+          <button type="submit" disabled={busy}
+            className="w-full py-3 rounded-xl2 font-semibold text-bg0 disabled:opacity-60 transition hover:brightness-110"
+            style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>
+            {busy ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+          </button>
+        </form>
+      </Card>
+    </div>
+  );
 }
 
-if (DOM.settingsForm) {
-    DOM.settingsForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        DOM.settingsError.style.display = "none";
-        DOM.settingsSuccess.style.display = "none";
-        
-        const oldToken = DOM.settingsOldToken.value;
-        const newAdminToken = DOM.settingsNewAdminToken.value.trim();
-        const newMcpToken = DOM.settingsNewMcpToken.value.trim();
-        
-        const submitBtn = DOM.settingsForm.querySelector("button");
-        submitBtn.disabled = true;
-        submitBtn.innerText = "กำลังบันทึก...";
-        
-        try {
-            await fetchAPI("/admin/api/settings/passwords", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    old_admin_token: oldToken,
-                    new_admin_token: newAdminToken,
-                    new_mcp_token: newMcpToken
-                })
-            });
-            
-            DOM.settingsSuccess.innerText = "✓ บันทึกรหัสผ่านใหม่เรียบร้อยแล้ว";
-            DOM.settingsSuccess.style.display = "block";
-            
-            // อัปเดตโทเค็นภายในแอปด้วยเผื่อว่าเราเปลี่ยน ADMIN_TOKEN ของตัวเอง
-            // เพื่อไม่ให้โดน 401 ใน fetch ครั้งถัดไป
-            if (newAdminToken) {
-                state.token = newAdminToken;
-                localStorage.setItem("admin_token", newAdminToken);
-            } else {
-                state.token = "";
-                localStorage.removeItem("admin_token");
-            }
-            
-            // รีโหลดข้อมูลหลังเปลี่ยนผ่านสำเร็จ
-            setTimeout(() => {
-                loadSettingsInfo();
-            }, 1000);
-        } catch (err) {
-            if (err.message !== "unauthorized") {
-                DOM.settingsError.innerText = err.message === "incorrect old password" 
-                    ? "รหัสผ่านเก่าไม่ถูกต้อง โปรดลองอีกครั้ง" 
-                    : `บันทึกล้มเหลว: ${err.message}`;
-                DOM.settingsError.style.display = "block";
-            }
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.innerText = "บันทึกการตั้งค่า";
-        }
-    });
-}
+// ── แอปหลัก ─────────────────────────────────────────────────────────────────
+function App() {
+  const [ready, setReady] = useState(false);     // ตรวจสิทธิ์เสร็จแล้ว
+  const [needLogin, setNeedLogin] = useState(false);
+  const [tab, setTab] = useState('users');
+  const [users, setUsers] = useState({});
+  const [online, setOnline] = useState(false);
+  const [liveUpdate, setLiveUpdate] = useState(null);
+  const wsRef = useRef(null);
 
-let ws = null;
-function connectWebSocket() {
-    if (ws) {
-        try { ws.close(); } catch(e) {}
-        ws = null;
-    }
-    
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const tokenParam = state.token ? `?token=${encodeURIComponent(state.token)}` : "";
-    const wsUrl = `${protocol}//${window.location.host}/admin/ws${tokenParam}`;
-    
-    ws = new WebSocket(wsUrl);
-    
-    ws.onmessage = (event) => {
-        try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === "update") {
-                const uid = msg.user_id;
-                const kind = msg.kind;
-                const data = msg.data;
-                
-                if (!state.users[uid]) {
-                    loadUsers();
-                } else {
-                    state.users[uid].last_seen = Math.floor(Date.now() / 1000);
-                    renderUsersList();
-                    
-                    if (state.currentUser === uid) {
-                        const user = state.users[uid];
-                        DOM.currentUserSubtitle.innerText = `ชื่อแอปพลิเคชัน: ${user.app_name || "ไม่มี"} | เชื่อมต่อล่าสุด: ${new Date().toLocaleString("th-TH")}`;
-                        
-                        if (state.currentPart === kind) {
-                            if (document.activeElement !== DOM.jsonEditor) {
-                                DOM.jsonEditor.value = JSON.stringify(data, null, 4);
-                                DOM.jsonValidity.style.display = "none";
-                                DOM.btnSavePart.disabled = false;
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (e) {
-            console.error("Error processing websocket message:", e);
+  const reloadUsers = useCallback(async () => {
+    try { setUsers(await api('/admin/api/users')); }
+    catch (e) { /* 401 จะเด้ง event เอง */ }
+  }, []);
+
+  const connectWS = useCallback(() => {
+    if (wsRef.current) { try { wsRef.current.close(); } catch (_) {} }
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const q = TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '';
+    const ws = new WebSocket(`${proto}//${location.host}/admin/ws${q}`);
+    wsRef.current = ws;
+    ws.onopen = () => setOnline(true);
+    ws.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(ev.data);
+        if (m.type === 'update') {
+          setUsers((prev) => {
+            if (!prev[m.user_id]) { reloadUsers(); return prev; }
+            return { ...prev, [m.user_id]: { ...prev[m.user_id], last_seen: Math.floor(Date.now() / 1000) } };
+          });
+          setLiveUpdate({ user_id: m.user_id, kind: m.kind, data: m.data, ts: Date.now() });
         }
+      } catch (_) {}
     };
-    
-    ws.onclose = () => {
-        setTimeout(() => {
-            if (state.token || !DOM.loginModal.style.display || DOM.loginModal.style.display === "none") {
-                connectWebSocket();
-            }
-        }, 3000);
-    };
-    
-    ws.onerror = (err) => {
-        console.error("WebSocket error:", err);
-    };
-}
+    ws.onclose = () => { setOnline(false); setTimeout(() => { if (!needLogin) connectWS(); }, 3000); };
+    ws.onerror = () => {};
+  }, [reloadUsers, needLogin]);
 
-// ── เริ่มต้นระบบตอนเปิดหน้าเว็บ ────────────────────────────────────────────────
-async function init() {
-    // โหลดรายชื่อผู้ใช้งานครั้งแรกเพื่อทดสอบโทเค็นด้วย
+  const boot = useCallback(async () => {
     try {
-        await fetchAPI("/admin/api/users");
-        // ถ้าไม่ error แสดงว่าโทเค็นใช้ได้ หรือ ไม่ต้องใช้
-        hideLoginModal();
-        switchTab("tab-users");
-    } catch (err) {
-        // หากไม่ได้รับอนุญาตให้โชว์หน้าล็อกอินขึ้นมา
-        if (err.message === "unauthorized" || state.token) {
-            showLoginModal();
-        }
+      setUsers(await api('/admin/api/users'));
+      setNeedLogin(false); setReady(true); connectWS();
+    } catch (e) {
+      if (e.message === 'unauthorized' || TOKEN) setNeedLogin(true);
+      else { setNeedLogin(true); }
+      setReady(true);
     }
+  }, [connectWS]);
+
+  useEffect(() => { boot(); }, [boot]);
+
+  // ดัก 401 จากที่ใด ๆ → เด้งหน้า login
+  useEffect(() => {
+    const h = () => setNeedLogin(true);
+    window.addEventListener('syn-unauth', h);
+    return () => window.removeEventListener('syn-unauth', h);
+  }, []);
+
+  const onLoginSuccess = () => { setNeedLogin(false); reloadUsers(); connectWS(); };
+  const logout = () => {
+    TOKEN = ''; localStorage.removeItem('admin_token');
+    if (wsRef.current) { try { wsRef.current.close(); } catch (_) {} }
+    setOnline(false); setNeedLogin(true);
+  };
+
+  if (!ready) return <div className="min-h-screen flex items-center justify-center"><Spinner /></div>;
+  if (needLogin) return <Login onSuccess={onLoginSuccess} />;
+
+  return (
+    <div className="min-h-screen">
+      <Header tab={tab} setTab={setTab} online={online} hasToken={!!TOKEN} onLogout={logout} />
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 fade-in" key={tab}>
+        {tab === 'users' && <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />}
+        {tab === 'agent' && <AgentTab users={users} />}
+        {tab === 'system' && <SystemTab />}
+        {tab === 'settings' && <SettingsTab onTokenSaved={reloadUsers} />}
+      </main>
+    </div>
+  );
 }
 
-// โหลดระบบ
-window.addEventListener("DOMContentLoaded", init);
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);

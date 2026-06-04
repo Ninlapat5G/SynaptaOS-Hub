@@ -4,217 +4,41 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SynaptaHub — Web Administrator</title>
-    <!-- โหลดฟอนต์ออนไลน์ แต่ถ้าเน็ตออฟไลน์จะดึงฟอนต์เครื่องอัตโนมัติ -->
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/jpeg" href="/admin/static/syn_icon_app.jpg">
+
+    <!-- React + Babel + Tailwind ผ่าน CDN — ไม่มีขั้นตอน build ให้ดูแล รันบน RPi ได้ตรง ๆ -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // ธีม Deep Glass — สีชุดเดียวกับฝั่งแอป (theme.dart)
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg0: '#080B12', bg1: '#10141F', panel: '#141925', card: '#1A2030', cardhi: '#20283A',
+              line: '#2A3142', lineStrong: '#3A4256',
+              ink: '#EEF1F5', inkDim: '#A6AEBC', inkXdim: '#6B7385',
+              accent: '#00D4FF', accent2: '#B44FFF', ok: '#34D399', danger: '#EF4444',
+            },
+            fontFamily: {
+              sans: ['Noto Sans Thai', 'Inter', 'system-ui', 'sans-serif'],
+              mono: ['Roboto Mono', 'monospace'],
+            },
+            borderRadius: { xl2: '18px' },
+          },
+        },
+      };
+    </script>
     <link rel="stylesheet" href="/admin/static/style.css">
-    <link rel="icon" type="image/jpeg" href="/admin/static/syn_icon_app.jpg" onerror="this.href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22 width=%22100%22 height=%22100%22><rect width=%22100%22 height=%22100%22 fill=%22%23080B12%22/><circle cx=%2250%22 cy=%2250%22 r=%2230%22 fill=%22%2300D4FF%22/></svg>'">
 </head>
-<body>
-
-    <!-- แถบด้านบนเรือนแสง (Glow Header) -->
-    <header class="app-header">
-        <div class="header-logo">
-            <span class="logo-circle"></span>
-            <h1>SynaptaOS <span class="logo-accent">Hub</span></h1>
-            <span class="badge">ADMIN PANEL</span>
-        </div>
-        <nav class="nav-tabs">
-            <button class="tab-btn active" data-tab="tab-users">
-                <svg class="tab-icon" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-                ผู้ใช้งาน (Users)
-            </button>
-            <button class="tab-btn" data-tab="tab-agent">
-                <svg class="tab-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-                เอเจนต์ (Agent)
-            </button>
-            <button class="tab-btn" data-tab="tab-system">
-                <svg class="tab-icon" viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
-                ระบบหลังบ้าน (System)
-            </button>
-            <button class="tab-btn" data-tab="tab-settings">
-                <svg class="tab-icon" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
-                ตั้งค่าความปลอดภัย (Settings)
-            </button>
-        </nav>
-        <div class="header-status">
-            <span class="status-dot online"></span>
-            <span class="status-text">Hub Online</span>
-            <button id="btn-logout" class="btn-secondary" style="display:none; margin-left: 15px;">ออกจากระบบ</button>
-        </div>
-    </header>
-
-    <!-- คอนเทนเนอร์หลัก -->
-    <main class="app-main">
-
-        <!-- แท็บที่ 1: ผู้ใช้งาน -->
-        <section id="tab-users" class="tab-content active">
-            <div class="layout-split">
-                <!-- ฝั่งซ้าย: รายชื่อผู้ใช้ -->
-                <div class="panel-left card">
-                    <div class="panel-header">
-                        <h2>รายชื่อผู้ใช้ทั้งหมด</h2>
-                        <button id="btn-refresh-users" class="btn-icon" title="โหลดใหม่">
-                            <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
-                        </button>
-                    </div>
-                    <div class="user-list" id="users-container">
-                        <!-- รายชื่อผู้ใช้จะมาแทรกที่นี่ -->
-                        <div class="loading-spinner">กำลังโหลดข้อมูลผู้ใช้...</div>
-                    </div>
-                </div>
-
-                <!-- ฝั่งขวา: รายละเอียดและการแก้ไขข้อมูล -->
-                <div class="panel-right card" id="user-detail-panel" style="display: none;">
-                    <div class="detail-header">
-                        <div>
-                            <h3 id="current-user-title">ชื่อผู้ใช้งาน</h3>
-                            <p class="subtitle" id="current-user-subtitle">App Name: - | Last Seen: -</p>
-                        </div>
-                        <div class="part-selector">
-                            <button class="part-tab-btn active" data-part="profile">Profile</button>
-                            <button class="part-tab-btn" data-part="kd">KD (อุปกรณ์)</button>
-                            <button class="part-tab-btn" data-part="scenes">Scenes</button>
-                            <button class="part-tab-btn" data-part="routines">Routines</button>
-                            <button class="part-tab-btn" data-part="phone">Phone</button>
-                        </div>
-                    </div>
-
-                    <div class="editor-container">
-                        <div class="editor-header">
-                            <span class="editor-filename" id="editor-filename-label">Profile</span>
-                        </div>
-                        <div class="ui-view-panel" id="ui-view-panel">
-                            <div class="loading-spinner">กำลังโหลดข้อมูล...</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- หน้าว่างเมื่อยังไม่เลือกผู้ใช้ -->
-                <div class="panel-right card flex-center" id="user-empty-panel">
-                    <div class="empty-state">
-                        <svg class="empty-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                        <p>เลือกผู้ใช้งานจากแถบทางซ้ายเพื่อดูหรือแก้ไขข้อมูลระบบ</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- แท็บที่ 2: คุยกับเอเจนต์ -->
-        <section id="tab-agent" class="tab-content">
-            <div class="layout-single card">
-                <div class="panel-header">
-                    <h2>พูดคุยเพื่อสั่งการเอเจนต์ (Agent Shell)</h2>
-                    <div class="agent-context-selector">
-                        <label for="agent-user-select">บริบทผู้ใช้งาน (User context):</label>
-                        <select id="agent-user-select">
-                            <option value="">-- ไม่ใช้บริบทของผู้ใช้งาน --</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="chat-container">
-                    <div class="chat-messages" id="chat-messages-box">
-                        <div class="message system-msg">
-                            ระบบเชื่อมต่อพร้อมแล้ว พิมพ์คำสั่งที่ต้องการให้บอทเริ่มทำงานได้ทันที เช่น "เปิดไฟในห้องทำงาน" หรือ "ตรวจสถานะระบบเบื้องต้น"
-                        </div>
-                    </div>
-                    
-                    <!-- โชว์ตอนเอเจนต์กำลังคิด -->
-                    <div class="agent-loader" id="agent-thinking-loader" style="display: none;">
-                        <span class="thinking-dot"></span>
-                        <span class="thinking-dot"></span>
-                        <span class="thinking-dot"></span>
-                        <span style="margin-left: 8px;">เอเจนต์กำลังคิดประมวลผลคำสั่ง...</span>
-                    </div>
-
-                    <form class="chat-input-area" id="agent-form">
-                        <input type="text" id="agent-input-field" placeholder="พิมพ์สิ่งที่คุณต้องการให้ระบบดำเนินการ..." autocomplete="off" required>
-                        <button type="submit" class="btn-primary">
-                            ส่งคำสั่ง
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </section>
-
-        <!-- แท็บที่ 3: ระบบหลังบ้าน -->
-        <section id="tab-system" class="tab-content">
-            <div class="layout-split">
-                <!-- ฝั่งซ้าย: ข้อมูลสถานะเครื่อง -->
-                <div class="panel-left card">
-                    <div class="panel-header">
-                        <h2>ข้อมูลระบบฮาร์ดแวร์</h2>
-                    </div>
-                    <div class="system-text-panel" id="system-info-panel">
-                        <pre id="system-info-text">กำลังโหลดข้อมูลระบบ...</pre>
-                    </div>
-                </div>
-
-                <!-- ฝั่งขวา: รายชื่อ MCP Tools -->
-                <div class="panel-right card">
-                    <div class="panel-header">
-                        <h2>รายชื่อเครื่องมือที่ระบบเปิดใช้งาน (MCP Tools)</h2>
-                    </div>
-                    <div class="tools-grid-container">
-                        <div class="tools-grid" id="tools-container">
-                            <div class="loading-spinner">กำลังดึงข้อมูลเครื่องมือทั้งหมด...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- แท็บที่ 4: ตั้งค่ารหัสผ่าน -->
-        <section id="tab-settings" class="tab-content">
-            <div class="layout-single flex-center">
-                <div class="card" style="width: 550px; padding: 35px; gap: 20px;">
-                    <div class="panel-header" style="border-bottom: none; padding: 0 0 10px 0; justify-content: center; width: 100%;">
-                        <h2>ตั้งค่ากุญแจความปลอดภัย</h2>
-                    </div>
-                    <form id="settings-form" style="width: 100%; display: flex; flex-direction: column; gap: 15px;">
-                        <div class="form-group" style="text-align: left; width: 100%;">
-                            <label for="settings-old-token" style="display: block; margin-bottom: 8px; font-size: 14px; color: var(--text-secondary);">รหัสผ่านผู้ดูแลระบบเดิม (เพื่อยืนยันตัวตน):</label>
-                            <input type="password" id="settings-old-token" placeholder="ระบุรหัสผ่านผู้ดูแลระบบปัจจุบัน (ถ้ายังไม่เคยตั้งให้เว้นว่าง)..." style="width:100%; background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; color:var(--text-primary); padding:12px; outline:none;">
-                        </div>
-                        <div class="form-group" style="text-align: left; width: 100%; border-top: 1px solid var(--card-border); padding-top: 20px;">
-                            <label for="settings-new-admin-token" style="display: block; margin-bottom: 8px; font-size: 14px; color: var(--text-secondary);">รหัสผ่านผู้ดูแลระบบใหม่ (ADMIN_TOKEN):</label>
-                            <input type="password" id="settings-new-admin-token" placeholder="กรอกรหัสผ่านผู้ดูแลระบบใหม่ (ปล่อยว่างหากต้องการเข้าได้โดยไม่ต้องใช้รหัส)..." style="width:100%; background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; color:var(--text-primary); padding:12px; outline:none;">
-                        </div>
-                        <div class="form-group" style="text-align: left; width: 100%;">
-                            <label for="settings-new-mcp-token" style="display: block; margin-bottom: 8px; font-size: 14px; color: var(--text-secondary);">รหัสความปลอดภัยสำหรับแอปมือถือ (MCP_TOKEN):</label>
-                            <input type="text" id="settings-new-mcp-token" placeholder="ป้อนรหัสเชื่อมต่อสำหรับแอปมือถือ (ปล่อยว่างหากไม่ต้องการเปิดใช้กุญแจ)..." style="width:100%; background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; color:var(--text-primary); padding:12px; outline:none;">
-                        </div>
-                        <div class="error-msg" id="settings-error" style="display: none; margin-bottom: 0;">รหัสผ่านเก่าไม่ถูกต้อง</div>
-                        <div class="success-msg" id="settings-success" style="display: none; color: var(--success-color); font-size: 14px; text-align: center;">✓ บันทึกรหัสผ่านใหม่เรียบร้อยแล้ว</div>
-                        <button type="submit" class="btn-primary" style="margin-top: 10px; width: 100%;">บันทึกการตั้งค่า</button>
-                    </form>
-                </div>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- หน้ากากตรวจสอบสิทธิ์ (Login Overlay) -->
-    <div class="login-overlay" id="login-modal">
-        <div class="login-card card">
-            <div class="login-header">
-                <span class="logo-circle large"></span>
-                <h2>เข้าสู่ระบบผู้ดูแลระบบ</h2>
-                <p>โปรดระบุกุญแจความปลอดภัย (ADMIN_TOKEN) ของคุณ</p>
-            </div>
-            <form id="login-form">
-                <div class="form-group">
-                    <input type="password" id="admin-token-input" placeholder="ป้อนกุญแจความปลอดภัย..." required autocomplete="current-password">
-                </div>
-                <div class="error-msg" id="login-error" style="display: none;">กุญแจความปลอดภัยไม่ถูกต้อง โปรดลองอีกครั้ง</div>
-                <button type="submit" class="btn-primary btn-block">ยืนยันตัวตน</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- โหลดภาพพื้นหลังสำหรับแอพชันในกรณีมีรูป -->
-    <script src="/admin/static/app.js"></script>
+<body class="bg-bg0 text-ink font-sans antialiased">
+    <div id="root"></div>
+    <script type="text/babel" data-presets="react" src="/admin/static/app.js"></script>
 </body>
 </html>

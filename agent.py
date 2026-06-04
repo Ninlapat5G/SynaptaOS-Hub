@@ -23,11 +23,15 @@ from tools import web_search as _web_search
 from tools import system_info
 
 _SYSTEM = """\
-คุณคือ agent ที่รันอยู่บนเครื่อง {os_type} มีหน้าที่ลงมือทำงานบนเครื่องนี้ตามที่ได้รับคำสั่ง
-ห้ามแค่รายงานหรืออธิบาย — ต้องใช้ tool เพื่อทำงานจริงเสมอ
+คุณคือ "{assistant_name}" — ผู้ช่วย AI ส่วนตัว ที่ตอนนี้กำลังทำงานในฐานะ "มือและสมองอีกฝั่ง" บนเครื่อง {os_type} ที่บ้าน
+(บนมือถือของเจ้าของก็มี "{assistant_name}" อีกตัวที่คุยกับเขาอยู่ — คุณคือคนเดียวกัน แค่คนละร่าง คนละหน้าที่)
+{persona}
 
-[หน้าที่หลัก]
-รับคำสั่ง → คิดว่าต้องใช้ tool อะไร → ลงมือทำ → รายงานผลสั้นๆ หนึ่งบรรทัด
+{about_user}
+
+[หน้าที่]
+รับคำสั่ง → คิดว่าต้องใช้ tool ไหน → ลงมือทำจริงบนเครื่องนี้ → เล่าผลสั้นๆ หนึ่งบรรทัดด้วยน้ำเสียงของตัวคุณเอง
+ห้ามแค่พูดหรืออธิบายลอยๆ — ต้องใช้ tool ทำงานจริงเสมอ
 
 [ตัวอย่างวิธีทำงาน บนเครื่อง {os_type}]
 {examples}
@@ -35,9 +39,9 @@ _SYSTEM = """\
 [กฎสำคัญ]
 - เปิดเพลงโดยไม่ระบุ platform → ใช้ YouTube เป็น default เสมอ
 - ค้นหาได้ผลแล้ว ต้องเปิดต่อด้วย os_exec ทันที ห้ามแค่ส่ง URL กลับ
-- ถ้าต้องการคุยหรือสั่งการแอปมือถือของผู้ใช้ (เช่น "บอกจิมว่า...", "สั่งให้แอปของสมใจ...") → ใช้ send_command_to_user_app เพื่อวิเคราะห์ชื่อและส่งคำสั่งทันที
-- ถ้าไม่แน่ใจว่าจะทำอะไร → ถามกลับสั้นๆ เพื่อให้ผู้ใช้ชี้แจง แทนที่จะเดาเอง
-- ตอบจบด้วยหนึ่งบรรทัด บอกว่าทำอะไรและผลลัพธ์คืออะไร ห้ามใช้ markdown
+- ถ้าต้องการคุยหรือฝากข้อความ/สั่งการแอปมือถือของใคร (เช่น "บอกนินว่า...", "เตือนเจ้าของว่า...", "สั่งให้แอปของสมใจ...") → ใช้ send_command_to_user_app เพื่อวิเคราะห์ชื่อแล้วส่งให้ทันที
+- ถ้าไม่แน่ใจว่าจะทำอะไร → ถามกลับสั้นๆ แทนที่จะเดาเอง
+- ปิดท้ายด้วยหนึ่งบรรทัด เล่าว่าทำอะไรและผลเป็นยังไง พูดให้เป็นธรรมชาติเหมือนคุยกับเจ้าของจริงๆ ไม่ต้องห้วนหรือเป็นทางการ ใส่อีโมจิได้นิดหน่อยถ้าเข้ากับเรื่อง · ห้ามใช้ markdown
 - ใช้คำสั่งให้ตรงกับระบบ {os_type} เสมอ (อย่าใช้คำสั่งของ OS อื่น)
 
 [ห้ามดำเนินการเด็ดขาด]
@@ -51,8 +55,38 @@ _model = ChatOpenAI(
     model=config.LLM_MODEL,
     api_key=config.LLM_API_KEY,
     base_url=config.LLM_BASE_URL,
-    temperature=0,
+    temperature=0.3,  # ขยับขึ้นนิดให้น้ำเสียงตอนเล่าผลเป็นธรรมชาติ ไม่ห้วนเหมือนหุ่นยนต์
 )
+
+
+def _identity(user_id: str | None):
+    """ดึงตัวตน (ชื่อ/บุคลิกของผู้ช่วย) + ข้อมูลเจ้าของ จาก profile ที่แอป sync มาเก็บไว้
+    ไม่รู้ว่าเป็น user ไหน → ใช้ค่า default กลางๆ"""
+    assistant_name = "ซิน"
+    persona = ""
+    about_user = "[เจ้าของเครื่อง]\n(ยังไม่รู้ว่าใครเป็นคนสั่ง — ทำงานตามคำสั่งที่ได้รับตามปกติ)"
+    if not user_id:
+        return assistant_name, persona, about_user
+
+    import store
+    prof = store.load_part(user_id, "profile") or {}
+    assistant_name = prof.get("assistantName") or assistant_name
+    persona = prof.get("systemPrompt") or ""
+
+    name = prof.get("displayName") or prof.get("app_name") or ""
+    bio = prof.get("userBio") or ""
+    mem = prof.get("userMemory") or ""
+    lines = []
+    if name:
+        lines.append(f"ชื่อ: {name}")
+    if bio:
+        lines.append(f"เกี่ยวกับเขา: {bio}")
+    if mem:
+        lines.append(f"สิ่งที่รู้เพิ่มเติมเกี่ยวกับเขา: {mem}")
+    if lines:
+        about_user = "[เจ้าของที่คุณดูแล — รู้จักเขาไว้ จะได้คุยและทำงานให้ถูกใจ]\n" + "\n".join(lines)
+
+    return assistant_name, persona, about_user
 
 
 def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user_id: str | None):
@@ -123,7 +157,15 @@ def run(
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}   # state ต่อ task เดียว
 
     examples = osprofile.profile(os_type)["examples"]
-    system_prompt = _SYSTEM.format(os_type=os_type, now=now, examples=examples) + "\n\n" + system_info.snapshot_text()
+    assistant_name, persona, about_user = _identity(user_id)
+    system_prompt = _SYSTEM.format(
+        assistant_name=assistant_name,
+        persona=persona,
+        about_user=about_user,
+        os_type=os_type,
+        now=now,
+        examples=examples,
+    ) + "\n\n" + system_info.snapshot_text()
     graph = create_react_agent(_model, _make_tools(kill_event, timeout, cwd_box, user_id), prompt=system_prompt)
 
     final_text = ""
