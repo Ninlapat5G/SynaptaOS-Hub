@@ -10,12 +10,18 @@ retained message ข้ามเน็ตได้ (ต่างจาก mDNS �
 import json
 import socket
 import subprocess
+import threading
 
 import paho.mqtt.client as mqtt
 
 import config
 
 _client: mqtt.Client | None = None
+_stop = threading.Event()
+
+# republish online ทุกกี่วิ — สั้นกว่า keepalive (30) เพื่อให้สถานะใน broker สดเสมอ
+# และถ้า LWT เคยเด้ง offline ไว้ heartbeat ตัวถัดไปจะ republish online ทับให้ทันที
+HEARTBEAT_SEC = 15
 
 
 def tailscale_ip() -> str:
@@ -69,8 +75,22 @@ def start() -> None:
     client.loop_start()
     _client = client
 
+    # heartbeat — republish online retained เรื่อย ๆ ตราบเท่าที่ Hub ยังรัน
+    # กันสถานะใน broker ค้างเป็น offline (จาก LWT ตอนเน็ตหลุดแว้บ) ทั้งที่ Hub ยังออนไลน์
+    _stop.clear()
+
+    def _heartbeat():
+        while not _stop.wait(HEARTBEAT_SEC):
+            try:
+                client.publish(status_topic, _status_payload("online", host), qos=1, retain=True)
+            except Exception:
+                pass
+
+    threading.Thread(target=_heartbeat, daemon=True).start()
+
 
 def stop() -> None:
+    _stop.set()
     if _client:
         host = tailscale_ip()
         status_topic = config.topic(f"hub/{config.AGENT_NAME}/status")
