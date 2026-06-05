@@ -861,11 +861,35 @@ function LocationTab({ users, liveUpdate, activeTab }) {
       });
       L.control.zoom({ position: 'topright' }).addTo(map);
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors &copy; CartoDB',
-        subdomains: 'abcd',
-        maxZoom: 20
-      }).addTo(map);
+      const retina = L.Browser.retina ? '@2x' : ''; // จอความละเอียดสูง → tile คมขึ้น
+
+      // ── ฐานแผนที่พรีเมียม (ทุกตัวฟรี ไม่ต้องใช้ API key) ──
+      // มืด (ดีฟอลต์) — CartoDB dark คมเข้มแบบ premium
+      const dark = L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${retina}.png`, {
+        attribution: '&copy; OpenStreetMap &copy; CARTO', subdomains: 'abcd', maxZoom: 20
+      });
+      // สว่าง — CartoDB Voyager (สีนุ่ม อ่านง่าย สไตล์พรีเมียม)
+      const voyager = L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}${retina}.png`, {
+        attribution: '&copy; OpenStreetMap &copy; CARTO', subdomains: 'abcd', maxZoom: 20
+      });
+      // ดาวเทียม — ภาพถ่าย Esri + ป้ายชื่อสถานที่ (ฟีลพรีเมียมแบบ Google/Life360)
+      const satellite = L.layerGroup([
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Imagery &copy; Esri', maxZoom: 20
+        }),
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+          maxZoom: 20
+        })
+      ]);
+
+      dark.addTo(map); // โหมดเริ่มต้น
+
+      // ตัวสลับโหมดแผนที่ (มุมขวาบน)
+      L.control.layers(
+        { '🌙 มืด': dark, '☀️ สว่าง': voyager, '🛰️ ดาวเทียม': satellite },
+        null,
+        { position: 'topright', collapsed: true }
+      ).addTo(map);
 
       mapRef.current = map;
     }
@@ -989,6 +1013,37 @@ function LocationTab({ users, liveUpdate, activeTab }) {
         .leaflet-popup-tip {
           background: rgba(26, 32, 48, 0.9) !important;
         }
+        .leaflet-control-layers {
+          background: rgba(20, 25, 37, 0.92) !important;
+          backdrop-filter: blur(12px) !important;
+          border: 1px solid rgba(42, 49, 66, 0.6) !important;
+          border-radius: 10px !important;
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3) !important;
+          color: #EEF1F5 !important;
+        }
+        .leaflet-control-layers-toggle {
+          background-color: rgba(20, 25, 37, 0.92) !important;
+          border-radius: 10px !important;
+          width: 36px !important;
+          height: 36px !important;
+        }
+        .leaflet-control-layers-expanded {
+          padding: 10px 12px !important;
+        }
+        .leaflet-control-layers label {
+          font-size: 13px !important;
+          margin: 4px 0 !important;
+          cursor: pointer;
+        }
+        .leaflet-control-layers-selector {
+          accent-color: #00D4FF;
+          margin-right: 6px !important;
+        }
+        .leaflet-control-attribution {
+          background: rgba(8, 11, 18, 0.7) !important;
+          color: #6b7280 !important;
+        }
+        .leaflet-control-attribution a { color: #9aa4b2 !important; }
       `}</style>
 
       <div className="flex items-center justify-between">
