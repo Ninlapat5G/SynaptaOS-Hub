@@ -179,17 +179,21 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
     def read_user_data(user_query: str, kind: str) -> str:
         """อ่านข้อมูลของผู้ใช้คนหนึ่ง: kind = kd (อุปกรณ์ในบ้าน) | scenes | routines | phone | profile
         user_query = ชื่อของผู้ใช้ (จะค้นให้) · เว้นว่าง = คนที่กำลังโฟกัสอยู่"""
+        import device_state
         uid = _resolve(user_query)
         if not uid:
             return f"ไม่พบผู้ใช้ที่ตรงกับ '{user_query}'"
         if kind not in store.PARTS:
             return f"kind ไม่ถูกต้อง (ใช้ได้: {', '.join(store.PARTS)})"
-        # สถานะสด (อุปกรณ์/มือถือ) → ขอให้แอป push ล่าสุดก่อนอ่าน จะได้ไม่ใช้ของเก่า (ไม่รอ heartbeat)
-        if kind in ("kd", "phone"):
-            import time
-            account.request_app_refresh(uid)
-            time.sleep(1.5)
+        # phone (แบต/ตำแหน่ง): แอป publish telemetry ต่อเนื่องผ่าน background process อยู่แล้ว
+        # → อ่านจาก store ได้เลย ไม่ต้อง poke ให้แอป push (เลิกใช้ Hub→App ผ่าน MQTT)
         data = store.load_part(uid, kind)
+        # kd: เติมสถานะสด (เปิด/ปิด/ค่า) ที่ Hub sub ตรงจาก MQTT เอง — ไม่ต้องปลุกแอปให้ส่ง
+        if kind == "kd" and isinstance(data, list):
+            for d in data:
+                st = device_state.get(d.get("topic", ""))
+                if st is not None:
+                    d["state"] = st
         return json.dumps(data, ensure_ascii=False) if data is not None else f"(ไม่มีข้อมูล {kind} ของคนนี้)"
 
     @tool
@@ -204,7 +208,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
             return f"ไม่พบผู้ใช้ที่ตรงกับคำค้นหา: '{user_query}'"
         prof = store.load_part(uid, "profile") or {}
         display_name = prof.get("displayName") or prof.get("app_name") or uid
-        res = account.send_mqtt_app_command(uid, command, command_type, sender=config.AGENT_NAME)
+        res = account.send_app_command(uid, command, command_type, sender=config.AGENT_NAME)
         return f"ผู้ใช้ '{display_name}' (id: {uid}): {res}"
 
     return [os_exec, web_search, query_system,

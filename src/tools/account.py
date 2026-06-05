@@ -10,6 +10,7 @@ account — ลงทะเบียนแอป + ซิงก์ข้อม�
 
 import json
 
+import config
 import store
 
 
@@ -59,7 +60,7 @@ def register(mcp):
         prof = store.load_part(uid, "profile") or {}
         display_name = prof.get("displayName") or prof.get("app_name") or uid
 
-        res = send_mqtt_app_command(uid, command, command_type)
+        res = send_app_command(uid, command, command_type)
         return json.dumps({"ok": True, "user_id": uid, "display_name": display_name, "result": res}, ensure_ascii=False)
 
 
@@ -99,98 +100,29 @@ def find_user_by_query(user_query: str) -> str | None:
     return best_match
 
 
-def request_app_refresh(user_id: str) -> None:
-    """บอกแอปให้ push สถานะล่าสุด (อุปกรณ์/มือถือ) ขึ้นมาทันที — ไม่ต้องรอ heartbeat
-    publish users/{id}/sync_req · แอปฝั่งนั้นรับแล้วจะ fullSync กลับมาเก็บที่ store"""
-    import paho.mqtt.publish as publish
-    import config
-    topic = config.topic(f"users/{user_id}/sync_req")
-    tls = {"cert_reqs": __import__("ssl").CERT_NONE} if config.MQTT_USE_TLS else None
-    try:
-        publish.single(topic, payload="{}", hostname=config.MQTT_BROKER, port=config.MQTT_PORT, qos=1, tls=tls)
-    except Exception:
-        pass
+def send_app_command(user_id: str, command: str, command_type: str, sender: str | None = None) -> str:
+    """ส่งคำสั่ง/ข้อความไปแอปมือถือผ่าน **FCM อย่างเดียว** (ช่องเดียวพอ)
 
-
-def send_mqtt_app_command(user_id: str, command: str, command_type: str, sender: str | None = None,
-                          wait_response: bool = True, timeout: float = 45.0) -> str:
-    """ส่งคำสั่งไปแอปผ่าน MQTT แล้ว (ถ้า wait_response) รอผลกลับจากแอปบน users/{id}/hub_response
-    ปิด loop การสื่อสาร 2 ทาง — ซินฝั่ง Hub จะได้รู้ว่าซินฝั่งแอปทำสำเร็จจริงไหม ไม่ใช่แค่ส่งออกไปลอย ๆ"""
-    import json
+    ทำไมไม่ใช้ MQTT: Hub→App ถ้าจะส่งถึงต้องให้แอปออนไลน์ MQTT ซึ่ง = แอปเปิดอยู่
+    แต่ FCM ปลุกได้ทุกสถานะ (เปิด/พับ/ถูกฆ่า) → FCM ส่งถึงครอบคลุมกว่าและไม่ต้องรอ timeout
+    (App→Hub ฝั่ง request ยิง MCP ตรงผ่าน Tailscale อยู่แล้ว · MQTT เหลือไว้แค่รับ telemetry จากแอป)
+    """
     import time
     import uuid
-    import threading
-    import paho.mqtt.client as mqtt
-    import config
+    from tools import fcm_push
 
     if sender is None:
         sender = config.AGENT_NAME
 
     corr_id = f"hub-cmd-{int(time.time())}-{str(uuid.uuid4())[:8]}"
-    payload = {
+    title = "ซินมีข้อความถึงคุณ" if command_type == "chat" else "Hub ฝากงานให้ทำ"
+    body = command if len(command) <= 120 else command[:117] + "..."
+    sent = fcm_push.send(user_id, title, body, {
         "corr_id": corr_id,
         "sender": sender,
         "type": command_type,
-        "payload": {("text" if command_type == "chat" else "action_prompt"): command},
-        "timestamp": int(time.time()),
-    }
-    cmd_topic = config.topic(f"users/{user_id}/hub_cmd")
-    resp_topic = config.topic(f"users/{user_id}/hub_response")
-
-    result = {"ok": None, "detail": None}
-    done = threading.Event()
-
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-
-    def on_connect(c, u, flags, rc, props=None):
-        if wait_response:
-            c.subscribe(resp_topic, qos=1)
-        c.publish(cmd_topic, json.dumps(payload, ensure_ascii=False), qos=1)
-
-    def on_message(c, u, msg):
-        try:
-            data = json.loads(msg.payload.decode("utf-8"))
-        except Exception:
-            return
-        if data.get("corr_id") == corr_id:
-            result["ok"] = data.get("ok")
-            result["detail"] = data.get("detail")
-            done.set()
-
-    client.on_connect = on_connect
-    client.on_message = on_message
-    if config.MQTT_USE_TLS:
-        import ssl
-        client.tls_set(cert_reqs=ssl.CERT_NONE)
-
-    try:
-        client.connect(config.MQTT_BROKER, config.MQTT_PORT, keepalive=30)
-    except Exception as e:
-        return f"ล้มเหลว (เชื่อม MQTT ไม่ได้: {e})"
-
-    client.loop_start()
-    try:
-        if not wait_response:
-            time.sleep(0.3)  # เผื่อเวลาให้ publish ออกก่อนตัดการเชื่อมต่อ
-            return f"ส่งคำสั่งแบบ {command_type} ไปแล้ว (corr_id: {corr_id})"
-        got = done.wait(timeout)
-    finally:
-        client.loop_stop()
-        client.disconnect()
-
-    if not got:
-        # แอปไม่ตอบ MQTT (น่าจะพับ/ถูกฆ่า/หลับ) → ลองเด้งผ่าน FCM ปลุกเครื่องแทน
-        from tools import fcm_push
-        title = "ซินมีข้อความถึงคุณ" if command_type == "chat" else "Hub ฝากงานให้ทำ"
-        body = command if len(command) <= 120 else command[:117] + "..."
-        sent = fcm_push.send(user_id, title, body, {
-            "corr_id": corr_id,
-            "sender": sender,
-            "type": command_type,
-            ("text" if command_type == "chat" else "action_prompt"): command,
-        })
-        if sent:
-            return f"แอปไม่ตอบ MQTT ใน {int(timeout)} วิ — ส่งผ่าน FCM ปลุกเครื่องแทนแล้ว (corr_id: {corr_id})"
-        return f"ส่งคำสั่งไปแล้วแต่แอปยังไม่ตอบกลับใน {int(timeout)} วินาที (อาจออฟไลน์หรือกำลังยุ่ง) — corr_id: {corr_id}"
-    status = "สำเร็จ" if result["ok"] else "ไม่สำเร็จ"
-    return f"แอปทำงานเสร็จแล้ว ({status}): {result['detail'] or '(ไม่มีรายละเอียด)'}"
+        ("text" if command_type == "chat" else "action_prompt"): command,
+    })
+    if sent:
+        return f"ส่งให้แอปผ่าน FCM แล้ว (corr_id: {corr_id})"
+    return f"ส่งไม่สำเร็จ — แอปนี้ยังไม่มี fcmToken หรือ FCM ปิดอยู่ (corr_id: {corr_id})"

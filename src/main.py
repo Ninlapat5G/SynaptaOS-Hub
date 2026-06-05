@@ -8,6 +8,7 @@ SynaptaOS Hub — entry point
 import config
 import discovery
 import telemetry
+import device_state
 import server
 from tools import system_info
 
@@ -32,8 +33,14 @@ def main():
         print(f"[telemetry] start failed (phone telemetry disabled): {e}")
 
     try:
+        device_state.start()
+    except Exception as e:
+        print(f"[devstate] start failed (live device state disabled): {e}")
+
+    try:
         server.run()
     finally:
+        device_state.stop()
         telemetry.stop()
         discovery.stop()
 
