@@ -841,7 +841,7 @@ function LocationTab({ users, liveUpdate, activeTab }) {
               }
             });
             if (bounds.length > 0) {
-              mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+              mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 17 });
             }
           }
         }
@@ -873,12 +873,14 @@ function LocationTab({ users, liveUpdate, activeTab }) {
         attribution: '&copy; OpenStreetMap &copy; CARTO', subdomains: 'abcd', maxZoom: 20
       });
       // ดาวเทียม — ภาพถ่าย Esri + ป้ายชื่อสถานที่ (ฟีลพรีเมียมแบบ Google/Life360)
+      // Esri มีภาพถึง z19 — เกินนั้น (z20) จะส่ง placeholder "Map data not yet available"
+      // → maxNativeZoom:19 ให้ Leaflet ดึง z19 มาขยายเองตอนซูม 20 (ไม่ขึ้นรูปเทา)
       const satellite = L.layerGroup([
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Imagery &copy; Esri', maxZoom: 20
+          attribution: 'Imagery &copy; Esri', maxZoom: 20, maxNativeZoom: 19
         }),
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: 20
+          maxZoom: 20, maxNativeZoom: 19
         })
       ]);
 
@@ -941,7 +943,7 @@ function LocationTab({ users, liveUpdate, activeTab }) {
     });
 
     if (bounds.length > 0 && !selectedUid) {
-      map.fitBounds(bounds, { padding: [50, 50] });
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 17 });
     }
   }, [loading, locs, users]);
 
