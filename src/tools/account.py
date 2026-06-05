@@ -40,32 +40,6 @@ def register(mcp):
             return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
         return json.dumps({"ok": True, "kind": kind}, ensure_ascii=False)
 
-    @mcp.tool()
-    def get_user_data(user_id: str, kind: str) -> str:
-        """อ่านข้อมูล 1 ส่วนของผู้ใช้จาก Hub. kind = kd|scenes|routines|phone|profile. คืน JSON string (ไม่มีข้อมูล = null)"""
-        try:
-            data = store.load_part(user_id, kind)
-        except ValueError as e:
-            return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
-        return json.dumps({"ok": True, "kind": kind, "data": data}, ensure_ascii=False)
-
-    @mcp.tool()
-    def send_command_to_user_app(user_query: str, command: str, command_type: str) -> str:
-        """ส่งคำสั่งหรือข้อความแชทไปยังแอปมือถือของผู้ใช้ผ่าน MQTT โดยวิเคราะห์ค้นหาจากข้อมูลโปรไฟล์ (ไม่ใช่ user_id ตรงๆ)
-        - user_query: ชื่อจริง ชื่อเล่น หรือข้อมูลใน bio เพื่อค้นหาผู้ใช้ที่ต้องการ
-        - command: ข้อความที่จะคุย หรือคำสั่งสั่งงาน
-        - command_type: 'chat' (ส่งข้อความคุยในแชทให้แอปตอบ) หรือ 'action' (ส่งคำสั่งเพื่อให้แอปทำงานเงียบๆ เบื้องหลัง)
-        """
-        uid = find_user_by_query(user_query)
-        if not uid:
-            return json.dumps({"ok": False, "error": f"ไม่พบผู้ใช้ที่ตรงกับคำค้นหา: '{user_query}'"}, ensure_ascii=False)
-        
-        prof = store.load_part(uid, "profile") or {}
-        display_name = prof.get("displayName") or prof.get("app_name") or uid
-
-        res = send_app_command(uid, command, command_type)
-        return json.dumps({"ok": True, "user_id": uid, "display_name": display_name, "result": res}, ensure_ascii=False)
-
 
 # ── ฟังก์ชันอำนวยความสะดวกภายนอก MCP ─────────────────────────────────────────
 def find_user_by_query(user_query: str) -> str | None:
