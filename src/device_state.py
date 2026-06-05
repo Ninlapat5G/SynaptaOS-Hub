@@ -12,6 +12,7 @@ topic อุปกรณ์อยู่ใน namespace MQTT รวม (ไม�
 """
 
 import json
+import logging
 import os
 import threading
 import time
@@ -21,6 +22,8 @@ import paho.mqtt.client as mqtt
 
 import config
 import store
+
+_log = logging.getLogger("devstate")
 
 _client: mqtt.Client | None = None
 _state: dict[str, dict] = {}     # device topic (relative) → {"value": str, "ts": int}
@@ -106,7 +109,10 @@ def start() -> None:
     def on_connect(c, u, flags, rc, props=None):
         _subscribed.clear()  # reconnect = broker ลืม sub หมด → sub ใหม่ตาม kd ปัจจุบัน
         _resync()
-        print(f"[devstate] subscribe {len(_subscribed)} device topics (โหลดจากไฟล์ {len(_state)} ค่า)")
+        _log.info("เชื่อม broker + subscribe %d device topics (โหลดจากไฟล์ %d ค่า)", len(_subscribed), len(_state))
+
+    def on_disconnect(c, u, disconnect_flags, rc, props=None):
+        _log.warning("หลุดจาก broker (rc=%s) — paho จะต่อใหม่ให้เอง", rc)
 
     def on_message(c, u, msg):
         global _dirty
@@ -122,8 +128,10 @@ def start() -> None:
             return  # ค่าเดิม ไม่ต้อง mark dirty
         _state[rel] = {"value": val, "ts": int(time.time())}
         _dirty = True
+        _log.info("อุปกรณ์ %s = %s", rel, val)
 
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     if config.MQTT_USE_TLS:
         import ssl

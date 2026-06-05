@@ -8,12 +8,14 @@ telemetry — รับสถานะมือถือ (แบต/ตำแห
 """
 
 import json
+import logging
 
 import paho.mqtt.client as mqtt
 
 import config
 import store
 
+_log = logging.getLogger("telemetry")
 _client: mqtt.Client | None = None
 
 
@@ -34,7 +36,10 @@ def start() -> None:
 
     def on_connect(c, u, flags, rc, props=None):
         c.subscribe(sub_topic, qos=1)
-        print(f"[telemetry] subscribe {sub_topic}")
+        _log.info("เชื่อม broker + subscribe %s", sub_topic)
+
+    def on_disconnect(c, u, disconnect_flags, rc, props=None):
+        _log.warning("หลุดจาก broker (rc=%s) — paho จะต่อใหม่ให้เอง", rc)
 
     def on_message(c, u, msg):
         uid = _uid_from_topic(msg.topic)
@@ -45,8 +50,12 @@ def start() -> None:
         except Exception:
             return
         store.save_part(uid, "phone", data)
+        _log.info("รับ telemetry จาก %s: แบต %s%%%s",
+                  uid, data.get("level", "?"),
+                  " (กำลังเคลื่อนที่)" if data.get("moving") else "")
 
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     if config.MQTT_USE_TLS:
         import ssl

@@ -9,9 +9,12 @@ account — ลงทะเบียนแอป + ซิงก์ข้อม�
 """
 
 import json
+import logging
 
 import config
 import store
+
+_log = logging.getLogger("account")
 
 
 def register(mcp):
@@ -124,5 +127,7 @@ def send_app_command(user_id: str, command: str, command_type: str, sender: str 
         ("text" if command_type == "chat" else "action_prompt"): command,
     })
     if sent:
+        _log.info("ส่ง FCM (%s) ให้ %s: %s", command_type, user_id, command[:80])
         return f"ส่งให้แอปผ่าน FCM แล้ว (corr_id: {corr_id})"
+    _log.warning("ส่ง FCM ให้ %s ไม่สำเร็จ (ไม่มี fcmToken/FCM ปิด)", user_id)
     return f"ส่งไม่สำเร็จ — แอปนี้ยังไม่มี fcmToken หรือ FCM ปิดอยู่ (corr_id: {corr_id})"

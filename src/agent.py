@@ -8,6 +8,7 @@ stateless ต่อ request: cwd เก็บใน box ที่สร้าง
 """
 
 import json
+import logging
 import threading
 
 from langchain_openai import ChatOpenAI
@@ -18,6 +19,8 @@ from langgraph.prebuilt import create_react_agent
 import config
 import osprofile
 from pathlib import Path
+
+_log = logging.getLogger("agent")
 from tools import os_exec as _os_exec
 from tools import web_search as _web_search
 from tools import system_info
@@ -251,6 +254,7 @@ def run(
         elif role == "agent":
             msgs.append(AIMessage(text))
     msgs.append(HumanMessage(task))
+    _log.info("รับงาน%s: %s", f" (user={user_id})" if user_id else "", task[:120])
 
     final_text = ""
     try:
@@ -263,18 +267,18 @@ def run(
                 return "[cancelled]"
             if "tools" in event:
                 for msg in event["tools"]["messages"]:
-                    print(f"      [{msg.name}] → {str(msg.content)[:120]}")
+                    _log.info("  [%s] → %s", msg.name, str(msg.content)[:120])
             if "agent" in event:
                 msg = event["agent"]["messages"][-1]
                 tool_calls = getattr(msg, "tool_calls", None)
                 if tool_calls:
                     for tc in tool_calls:
-                        print(f"      call {tc['name']}({tc['args']})")
+                        _log.info("  เรียก %s(%s)", tc["name"], tc["args"])
                 elif msg.content:
                     final_text = str(msg.content)
-                    print(f"      final → {final_text[:120]}")
+                    _log.info("  ตอบ → %s", final_text[:120])
     except Exception as e:
-        print(f"      [error] {e}")
+        _log.error("  ผิดพลาด: %s", e)
         return f"[error] {e}"
 
     return final_text or "[no response]"

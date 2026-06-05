@@ -8,6 +8,7 @@ retained message ข้ามเน็ตได้ (ต่างจาก mDNS �
 """
 
 import json
+import logging
 import socket
 import subprocess
 import threading
@@ -17,6 +18,7 @@ import paho.mqtt.client as mqtt
 
 import config
 
+_log = logging.getLogger("discovery")
 _client: mqtt.Client | None = None
 _stop = threading.Event()
 _started_at = 0  # epoch ตอน Hub เริ่มรอบนี้ — App เห็นค่าเปลี่ยน = Hub restart → ดึง tools ใหม่
@@ -64,9 +66,13 @@ def start() -> None:
 
     def on_connect(c, u, flags, rc, props=None):
         c.publish(status_topic, _status_payload("online", host), qos=1, retain=True)
-        print(f"[discovery] broadcast {status_topic} → host={host} port={config.MCP_PORT}")
+        _log.info("เชื่อม broker + ประกาศ online %s → host=%s port=%s", status_topic, host, config.MCP_PORT)
+
+    def on_disconnect(c, u, disconnect_flags, rc, props=None):
+        _log.warning("หลุดจาก broker (rc=%s) — paho จะต่อใหม่ให้เอง", rc)
 
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     # LWT — broker publish offline ให้เองถ้า Hub หลุดกะทันหัน
     client.will_set(status_topic, _status_payload("offline", host), qos=1, retain=True)
 
