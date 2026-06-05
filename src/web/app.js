@@ -375,7 +375,7 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
               <p className="text-xs text-inkDim mt-0.5">แอป: {users[sel] && users[sel].app_name || '—'} • ล่าสุด: {thDate(users[sel] && users[sel].last_seen)}</p>
             </div>
             <button onClick={() => deleteUser(sel)}
-              className="text-xs px-3 py-1.5 rounded-lg border border-red-500/40 text-red-400 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500 transition">
+              className="shrink-0 whitespace-nowrap text-xs px-3 py-1.5 rounded-lg border border-red-500/40 text-red-400 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500 transition">
               ลบผู้ใช้
             </button>
           </div>
@@ -609,9 +609,9 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 h-[76vh]">
+    <div className="flex flex-col lg:grid lg:grid-cols-[1fr_340px] gap-4 lg:h-[76vh]">
       {/* ฝั่งแชทบับเบิ้ล */}
-      <Card className="p-4 sm:p-5 flex flex-col h-full border border-line">
+      <Card className="p-4 sm:p-5 flex flex-col h-[72vh] lg:h-full border border-line">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
           <div className="flex items-center gap-2">
             <img src="/admin/static/syn_icon_2.jpg" alt="ซิน" className="w-8 h-8 rounded-full object-cover glow-accent shrink-0" />
@@ -664,7 +664,7 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
       </Card>
 
       {/* ฝั่งแดชบอร์ดแสดงผลกระบวนการทำงานเครื่องมือ (Timeline Flow) */}
-      <Card className="p-4 sm:p-5 flex flex-col h-full border border-line overflow-hidden">
+      <Card className="p-4 sm:p-5 flex flex-col h-[50vh] lg:h-full border border-line overflow-hidden">
         <AgentStepsFlow steps={steps} />
       </Card>
     </div>
