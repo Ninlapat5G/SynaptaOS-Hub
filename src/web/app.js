@@ -798,7 +798,6 @@ function LocationTab({ users, liveUpdate, activeTab }) {
   const [loading, setLoading] = useState(true);
   const [selectedUid, setSelectedUid] = useState(null);
   const [msgText, setMsgText] = useState('');
-  const [msgType, setMsgType] = useState('chat'); // 'chat' or 'action'
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState(null);
 
@@ -967,7 +966,7 @@ function LocationTab({ users, liveUpdate, activeTab }) {
       const res = await api(`/admin/api/users/${selectedUid}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msgText.trim(), type: msgType })
+        body: JSON.stringify({ message: msgText.trim() })
       });
       setSendResult({ ok: true, text: `✓ ${res.result || 'ส่งสำเร็จ'}` });
       setMsgText('');
@@ -1167,27 +1166,11 @@ function LocationTab({ users, liveUpdate, activeTab }) {
 
                 {/* กล่องส่ง FCM ถึงแอป */}
                 <form onSubmit={sendMessage} className="flex flex-col gap-3 border-t border-line pt-4">
-                  <div className="text-xs uppercase tracking-wide text-accent2 font-semibold">💬 ส่งข้อความ/คำสั่งหาผู้ช่วย (FCM)</div>
-                  
-                  <textarea value={msgText} onChange={(e) => setMsgText(e.target.value)} disabled={sending}
-                    placeholder="พิมพ์สารเพื่อสั่งงานหรือทักทายแอปผู้ช่วยคนนี้..." rows={3}
-                    className="w-full bg-bg1/70 border border-line rounded-xl2 px-3.5 py-2.5 outline-none focus:border-accent2 transition text-xs text-ink placeholder:text-inkXdim disabled:opacity-60 resize-none" />
+                  <div className="text-xs uppercase tracking-wide text-accent2 font-semibold">💬 ส่งข้อความหาผู้ช่วยของผู้ใช้คนนี้</div>
 
-                  <div className="flex items-center justify-between gap-2 text-xs text-inkDim">
-                    <span className="shrink-0">ประเภทคำสั่ง:</span>
-                    <div className="flex gap-2">
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="radio" name="cmd_type" value="chat" checked={msgType === 'chat'} onChange={() => setMsgType('chat')} disabled={sending}
-                          className="accent-accent2" />
-                        <span>แชทคุย (Chat)</span>
-                      </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="radio" name="cmd_type" value="action" checked={msgType === 'action'} onChange={() => setMsgType('action')} disabled={sending}
-                          className="accent-accent2" />
-                        <span>สั่งงาน (Action)</span>
-                      </label>
-                    </div>
-                  </div>
+                  <textarea value={msgText} onChange={(e) => setMsgText(e.target.value)} disabled={sending}
+                    placeholder="พิมพ์ข้อความหรือสิ่งที่อยากให้ผู้ช่วยทำ..." rows={3}
+                    className="w-full bg-bg1/70 border border-line rounded-xl2 px-3.5 py-2.5 outline-none focus:border-accent2 transition text-xs text-ink placeholder:text-inkXdim disabled:opacity-60 resize-none" />
 
                   {sendResult && (
                     <div className={`text-[11px] text-center p-2 rounded-lg font-medium ${sendResult.ok ? 'bg-ok/10 text-ok border border-ok/20' : 'bg-danger/10 text-danger border border-danger/20'}`}>
