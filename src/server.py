@@ -35,11 +35,13 @@ class TokenGuard(BaseHTTPMiddleware):
 
 
 def build_app():
-    """คืน Starlette app ของ streamable-http พร้อม token guard ครอบ และเพิ่มหน้าเว็บควบคุม"""
+    """คืน Starlette app ของ streamable-http พร้อม token guard ครอบ + REST API (app→hub) + หน้าเว็บควบคุม"""
     app = mcp.streamable_http_app()
     app.add_middleware(TokenGuard)
     import webadmin
+    import api
     webadmin.mount(app, mcp)
+    api.mount(app)  # REST endpoint ฝั่งแอป (/api/*) — งานที่ไม่ผ่าน agent เช่น sync ข้อมูล
     return app
 
 
