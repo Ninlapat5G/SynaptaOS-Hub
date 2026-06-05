@@ -339,6 +339,7 @@ async def astream_run(
         elif role == "agent":
             msgs.append(AIMessage(text))
     msgs.append(HumanMessage(task))
+    _log.info("รับงานสตรีม%s: %s", f" (user={user_id})" if user_id else "", task[:120])
 
     try:
         async for event in graph.astream(
@@ -348,6 +349,7 @@ async def astream_run(
         ):
             if "tools" in event:
                 for msg in event["tools"]["messages"]:
+                    _log.info("  [%s] → %s", msg.name, str(msg.content)[:120])
                     yield {
                         "type": "tool_end",
                         "name": msg.name,
@@ -358,12 +360,14 @@ async def astream_run(
                 tool_calls = getattr(msg, "tool_calls", None)
                 if tool_calls:
                     for tc in tool_calls:
+                        _log.info("  เรียก %s(%s)", tc["name"], tc["args"])
                         yield {
                             "type": "tool_start",
                             "name": tc["name"],
                             "args": tc["args"]
                         }
                 elif msg.content:
+                    _log.info("  ตอบ → %s", str(msg.content)[:120])
                     yield {"type": "reply_start"}
                     full_reply = msg.content
                     chunk_size = 4
@@ -373,5 +377,6 @@ async def astream_run(
                         await asyncio.sleep(0.01)
                     yield {"type": "reply_end", "reply": full_reply}
     except Exception as e:
+        _log.error("  ผิดพลาด: %s", e)
         yield {"type": "error", "error": str(e)}
 
