@@ -34,6 +34,7 @@ const ICONS = {
   settings: 'M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z',
   refresh: 'M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
   send: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z',
+  location: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z',
 };
 
 // ── ชิ้นส่วน UI ที่ใช้ซ้ำ ───────────────────────────────────────────────────
@@ -99,9 +100,28 @@ function Login({ onSuccess }) {
   );
 }
 
+// ── overlay เมื่อ Hub ออฟไลน์ — บล็อกการใช้งานจนกว่าจะต่อกลับ (web admin ผูกกับ Hub) ──
+function HubOffline() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg0/90 backdrop-blur-md p-5">
+      <Card className="w-full max-w-sm p-8 text-center fade-in">
+        <div className="flex justify-center mb-4">
+          <span className="w-10 h-10 border-2 border-danger/40 border-t-danger rounded-full animate-spin" />
+        </div>
+        <h2 className="text-lg font-semibold mb-2">Hub ออฟไลน์</h2>
+        <p className="text-sm text-inkDim leading-relaxed">
+          ขาดการเชื่อมต่อกับ Hub — กำลังพยายามเชื่อมต่อใหม่ให้อัตโนมัติ<br />
+          ตรวจสอบว่าเครื่อง Hub เปิดอยู่และอยู่ในเครือข่ายเดียวกัน
+        </p>
+      </Card>
+    </div>
+  );
+}
+
 // ── ส่วนหัว + แท็บ ──────────────────────────────────────────────────────────
 const TABS = [
   { id: 'users', label: 'ผู้ใช้งาน', icon: ICONS.users },
+  { id: 'location', label: 'ตำแหน่ง', icon: ICONS.location },
   { id: 'agent', label: 'เอเจนต์', icon: ICONS.agent },
   { id: 'system', label: 'ระบบหลังบ้าน', icon: ICONS.system },
   { id: 'settings', label: 'ความปลอดภัย', icon: ICONS.settings },
@@ -581,6 +601,102 @@ function SettingsTab({ onTokenSaved }) {
   );
 }
 
+// ── แท็บ: ตำแหน่ง (Location) ─────────────────────────────────────────────────
+// โชว์พิกัด lat/lng ของแต่ละ user (มาจาก telemetry ที่ background process ส่งขึ้นมา)
+// + แผนที่ OpenStreetMap แบบ embed (ไม่ต้องใช้ API key — รันบน RPi ได้ตรง ๆ)
+const osmEmbed = (lat, lng) => {
+  const d = 0.008;
+  const bbox = `${lng - d},${lat - d},${lng + d},${lat + d}`;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lng}`;
+};
+const gmapsLink = (lat, lng) => `https://www.google.com/maps?q=${lat},${lng}`;
+
+function LocationCard({ uid, user, phone }) {
+  const lat = phone && typeof phone.lat === 'number' ? phone.lat : null;
+  const lng = phone && typeof phone.lng === 'number' ? phone.lng : null;
+  const has = lat !== null && lng !== null;
+  return (
+    <Card className="p-4 fade-in">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <div className="font-medium truncate">{(user && user.app_name) || 'แอปนิรนาม'}</div>
+          <div className="text-xs text-inkDim font-mono truncate">{uid}</div>
+        </div>
+        {phone && phone.moving
+          ? <Badge color="accent">กำลังเคลื่อนที่</Badge>
+          : <Badge color="dim">อยู่นิ่ง</Badge>}
+      </div>
+
+      {has ? (
+        <>
+          <div className="rounded-xl2 overflow-hidden border border-line mb-3">
+            <iframe title={'map-' + uid} className="w-full h-52" loading="lazy"
+              src={osmEmbed(lat, lng)} style={{ border: 0 }} />
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="glass-soft rounded-xl2 p-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-accent mb-0.5">Latitude</div>
+              <div className="font-mono text-sm">{lat.toFixed(6)}</div>
+            </div>
+            <div className="glass-soft rounded-xl2 p-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-accent mb-0.5">Longitude</div>
+              <div className="font-mono text-sm">{lng.toFixed(6)}</div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-xs text-inkDim">
+            <span>🔋 {phone && phone.level !== undefined ? phone.level + '%' : '—'}{phone && phone.charging ? ' ⚡' : ''}</span>
+            <a href={gmapsLink(lat, lng)} target="_blank" rel="noreferrer"
+              className="text-accent hover:underline">เปิดใน Google Maps →</a>
+          </div>
+        </>
+      ) : (
+        <div className="text-sm text-inkXdim py-8 text-center">ยังไม่มีพิกัด (ผู้ใช้อาจปิดตำแหน่ง หรือยังไม่ส่ง telemetry)</div>
+      )}
+    </Card>
+  );
+}
+
+function LocationTab({ users, liveUpdate }) {
+  const [locs, setLocs] = useState({}); // uid → phone data
+  const [loading, setLoading] = useState(true);
+  const ids = Object.keys(users);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    const entries = await Promise.all(Object.keys(users).map(async (uid) => {
+      try { return [uid, await api(`/admin/api/users/${uid}/phone`)]; }
+      catch (_) { return [uid, null]; }
+    }));
+    setLocs(Object.fromEntries(entries));
+    setLoading(false);
+  }, [users]);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  // อัปเดตสด: telemetry ของใครเข้ามา → ขยับหมุดคนนั้นทันที
+  useEffect(() => {
+    if (liveUpdate && liveUpdate.kind === 'phone') {
+      setLocs((prev) => ({ ...prev, [liveUpdate.user_id]: liveUpdate.data }));
+    }
+  }, [liveUpdate]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold">ตำแหน่งผู้ใช้ ({ids.length})</h2>
+        <button onClick={loadAll} title="โหลดใหม่"
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-inkDim hover:text-accent hover:bg-white/5 transition">
+          <Icon path={ICONS.refresh} className="w-4 h-4" />
+        </button>
+      </div>
+      {loading ? <Spinner /> : ids.length === 0 ? <Spinner text="ไม่พบผู้ใช้ในระบบ" />
+        : <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {ids.map((uid) => <LocationCard key={uid} uid={uid} user={users[uid]} phone={locs[uid]} />)}
+        </div>}
+    </div>
+  );
+}
+
 // ── แอปหลัก ─────────────────────────────────────────────────────────────────
 function App() {
   const [ready, setReady] = useState(false);     // ตรวจสิทธิ์เสร็จแล้ว
@@ -588,6 +704,7 @@ function App() {
   const [tab, setTab] = useState('users');
   const [users, setUsers] = useState({});
   const [online, setOnline] = useState(false);
+  const [hubDown, setHubDown] = useState(false); // ออฟไลน์ค้างเกิน 4 วิ → บล็อกหน้าจอ
   const [liveUpdate, setLiveUpdate] = useState(null);
   // บทสนทนาแท็บเอเจนต์ — เก็บในหน่วยความจำเท่านั้น (คงอยู่ข้ามการสลับแท็บ แต่ reload หน้า = เริ่มใหม่)
   const [agentMsgs, setAgentMsgs] = useState([{ role: 'sys', text: 'ระบบพร้อมแล้ว พิมพ์คำสั่งให้เอเจนต์ทำงานได้เลย เช่น "เปิดเพลง lofi" หรือ "ดู disk ที่เหลือ"' }]);
@@ -646,6 +763,13 @@ function App() {
     return () => window.removeEventListener('syn-unauth', h);
   }, []);
 
+  // Hub ออฟไลน์ค้าง (ws ต่อไม่ได้) เกิน 4 วิ → ขึ้น overlay บล็อก (กันแฟลชตอนหลุดแวบเดียว)
+  useEffect(() => {
+    if (online) { setHubDown(false); return; }
+    const t = setTimeout(() => setHubDown(true), 4000);
+    return () => clearTimeout(t);
+  }, [online]);
+
   const onLoginSuccess = () => { setNeedLogin(false); reloadUsers(); connectWS(); };
   const logout = () => {
     TOKEN = ''; localStorage.removeItem('admin_token');
@@ -659,12 +783,25 @@ function App() {
   return (
     <div className="min-h-screen">
       <Header tab={tab} setTab={setTab} online={online} hasToken={!!TOKEN} onLogout={logout} />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 fade-in" key={tab}>
-        {tab === 'users' && <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />}
-        {tab === 'agent' && <AgentTab users={users} msgs={agentMsgs} setMsgs={setAgentMsgs} ctxUser={agentCtxUser} setCtxUser={setAgentCtxUser} />}
-        {tab === 'system' && <SystemTab />}
-        {tab === 'settings' && <SettingsTab onTokenSaved={reloadUsers} />}
+      {/* คงทุกแท็บไว้ (ซ่อน/โชว์ด้วย display) — สลับแท็บแล้วข้อมูลแต่ละหน้าไม่หาย ไม่ต้องโหลดใหม่ */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5">
+        <div style={{ display: tab === 'users' ? '' : 'none' }}>
+          <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />
+        </div>
+        <div style={{ display: tab === 'location' ? '' : 'none' }}>
+          <LocationTab users={users} liveUpdate={liveUpdate} />
+        </div>
+        <div style={{ display: tab === 'agent' ? '' : 'none' }}>
+          <AgentTab users={users} msgs={agentMsgs} setMsgs={setAgentMsgs} ctxUser={agentCtxUser} setCtxUser={setAgentCtxUser} />
+        </div>
+        <div style={{ display: tab === 'system' ? '' : 'none' }}>
+          <SystemTab />
+        </div>
+        <div style={{ display: tab === 'settings' ? '' : 'none' }}>
+          <SettingsTab onTokenSaved={reloadUsers} />
+        </div>
       </main>
+      {hubDown && <HubOffline />}
     </div>
   );
 }
