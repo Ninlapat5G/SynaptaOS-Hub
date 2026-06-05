@@ -924,7 +924,7 @@ function LocationTab({ users, liveUpdate, activeTab }) {
               <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
             </div>
             <div class="mt-1 px-2 py-0.5 rounded-md bg-[#10141F]/90 border border-[#2A3142] text-[10px] font-semibold text-[#EEF1F5] shadow-md whitespace-nowrap select-none">
-              ${name} ${bat ? `(${bat})` : ''}
+              ${name}${bat ? ` 🔋${bat}` : ''}
             </div>
           </div>
         `,
