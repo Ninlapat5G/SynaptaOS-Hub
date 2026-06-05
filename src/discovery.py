@@ -11,6 +11,7 @@ import json
 import socket
 import subprocess
 import threading
+import time
 
 import paho.mqtt.client as mqtt
 
@@ -18,6 +19,7 @@ import config
 
 _client: mqtt.Client | None = None
 _stop = threading.Event()
+_started_at = 0  # epoch ตอน Hub เริ่มรอบนี้ — App เห็นค่าเปลี่ยน = Hub restart → ดึง tools ใหม่
 
 # republish online ทุกกี่วิ — สั้นกว่า keepalive (30) เพื่อให้สถานะใน broker สดเสมอ
 # และถ้า LWT เคยเด้ง offline ไว้ heartbeat ตัวถัดไปจะ republish online ทับให้ทันที
@@ -48,12 +50,13 @@ def tailscale_ip() -> str:
 
 
 def _status_payload(status: str, host: str) -> str:
-    return json.dumps({"status": status, "host": host, "port": config.MCP_PORT})
+    return json.dumps({"status": status, "host": host, "port": config.MCP_PORT, "started_at": _started_at})
 
 
 def start() -> None:
     """connect broker, ตั้ง LWT offline, publish retained online + endpoint"""
-    global _client
+    global _client, _started_at
+    _started_at = int(time.time())
     host = tailscale_ip()
     status_topic = config.topic(f"hub/{config.AGENT_NAME}/status")
 
