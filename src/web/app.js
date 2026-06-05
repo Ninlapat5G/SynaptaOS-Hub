@@ -851,7 +851,7 @@ function LocationTab({ users, liveUpdate, activeTab }) {
 
   // สร้างแผนที่ Leaflet
   useEffect(() => {
-    if (!window.L || !containerRef.current || loading) return;
+    if (!window.L || !containerRef.current) return;
 
     if (!mapRef.current) {
       const map = L.map(containerRef.current, {
@@ -869,6 +869,8 @@ function LocationTab({ users, liveUpdate, activeTab }) {
 
       mapRef.current = map;
     }
+
+    if (loading) return;
 
     const map = mapRef.current;
 
@@ -999,14 +1001,16 @@ function LocationTab({ users, liveUpdate, activeTab }) {
         </button>
       </div>
 
-      {loading ? (
-        <Spinner text="กำลังโหลดแผนที่และพิกัดผู้ใช้..." />
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
-          {/* ส่วนแสดงแผนที่ Leaflet */}
-          <Card className="p-2 relative h-[50vh] lg:h-[68vh] overflow-hidden flex flex-col border border-line">
-            <div ref={containerRef} className="w-full h-full rounded-xl2" style={{ minHeight: '350px' }} />
-          </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
+        {/* ส่วนแสดงแผนที่ Leaflet */}
+        <Card className="p-2 relative h-[50vh] lg:h-[68vh] overflow-hidden flex flex-col border border-line">
+          {loading && (
+            <div className="absolute inset-0 z-20 bg-bg0/80 backdrop-blur-sm flex items-center justify-center rounded-xl2">
+              <Spinner text="กำลังโหลดแผนที่และพิกัดผู้ใช้..." />
+            </div>
+          )}
+          <div ref={containerRef} className="w-full h-full rounded-xl2" style={{ minHeight: '350px' }} />
+        </Card>
 
           {/* แผงควบคุมและส่งข้อความหาแอป */}
           <Card className="p-5 flex flex-col justify-between h-fit lg:h-[68vh] border border-line gap-4 font-sans">
@@ -1151,7 +1155,6 @@ function LocationTab({ users, liveUpdate, activeTab }) {
             )}
           </Card>
         </div>
-      )}
     </div>
   );
 }
