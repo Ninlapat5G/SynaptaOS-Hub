@@ -112,6 +112,27 @@ def mount(app, mcp):
         store.save_part(uid_safe, kind, body)
         return JSONResponse({"status": "saved"})
 
+    # API ส่งข้อความ/คำสั่งไปที่แอปผู้ใช้ผ่าน FCM
+    @route("/admin/api/users/{uid}/message", methods=["POST"])
+    async def api_send_message_to_user(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        uid = request.path_params.get("uid", "")
+        uid_safe = store._safe(uid)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        
+        message = body.get("message", "")
+        cmd_type = body.get("type", "chat")
+        if not message:
+            return JSONResponse({"error": "message is required"}, status_code=400)
+            
+        from tools import account
+        res = account.send_app_command(uid_safe, message, cmd_type, sender="admin_web")
+        return JSONResponse({"status": "sent", "result": res})
+
     # 5. API คุยกับเอเจนต์แบบสลับเธรด (Thread) เพื่อป้องกันไม่ให้เซิร์ฟเวอร์ค้าง
     @route("/admin/api/agent", methods=["POST"])
     async def api_agent_chat(request):
@@ -223,6 +244,33 @@ def mount(app, mcp):
         finally:
             if websocket in active_websockets:
                 active_websockets.remove(websocket)
+
+    @ws_route("/admin/ws/agent")
+    async def websocket_agent_endpoint(websocket: WebSocket):
+        capture_loop()
+        token = websocket.query_params.get("token", "")
+        admin_token = config.get_admin_token()
+        if admin_token and token != admin_token:
+            await websocket.close(code=4003)
+            return
+
+        await websocket.accept()
+        try:
+            while True:
+                msg_text = await websocket.receive_text()
+                data = json.loads(msg_text)
+                task = data.get("task", "")
+                user_id = data.get("user_id")
+                user_id_safe = store._safe(user_id) if user_id else None
+                history = data.get("history") or []
+                
+                try:
+                    async for event in agent.astream_run(task, user_id_safe, history):
+                        await websocket.send_text(json.dumps(event, ensure_ascii=False))
+                except Exception as e:
+                    await websocket.send_text(json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False))
+        except WebSocketDisconnect:
+            pass
 
     def broadcast_update(user_id: str, kind: str, data):
         loop = main_loop

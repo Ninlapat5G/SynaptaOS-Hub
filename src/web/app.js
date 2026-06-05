@@ -395,33 +395,205 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
   );
 }
 
+// A component to display the tools call flow
+function AgentStepsFlow({ steps }) {
+  const MotionObj = window.Motion || window.FramerMotion || window.framerMotion;
+  const MotionDiv = MotionObj && MotionObj.motion ? MotionObj.motion.div : 'div';
+  const AnimatePresence = MotionObj ? MotionObj.AnimatePresence : React.Fragment;
+
+  if (steps.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-inkDim text-xs h-full gap-2">
+        <div className="text-xl">⚡</div>
+        <p>สถานะการทำงานของ Agent (Tool Flow) จะแสดงขึ้นที่นี่ทีละขั้นตอนค่ะ</p>
+      </div>
+    );
+  }
+
+  const getArgsString = (args) => {
+    if (!args) return '';
+    if (typeof args === 'string') return args;
+    try { return JSON.stringify(args, null, 2); }
+    catch (_) { return String(args); }
+  };
+
+  const getResultString = (res) => {
+    if (!res) return '';
+    const s = String(res);
+    if (s.length > 250) return s.slice(0, 247) + '...';
+    return s;
+  };
+
+  return (
+    <div className="flex flex-col gap-3 h-full overflow-y-auto pr-1">
+      <div className="text-[11px] uppercase tracking-wide text-accent font-semibold mb-1 flex items-center justify-between">
+        <span>กระบวนการทำงานเบื้องหลัง</span>
+        {steps.some(s => s.status === 'running') && (
+          <span className="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
+        )}
+      </div>
+      <AnimatePresence>
+        {steps.map((s) => (
+          <MotionDiv
+            key={s.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className={`p-3 rounded-xl2 border text-xs flex flex-col gap-2 transition ${
+              s.status === 'running'
+                ? 'border-accent/40 bg-accent/5 shadow-[0_0_12px_rgba(0,212,255,0.12)]'
+                : 'border-line bg-bg1/40'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-medium">
+              {s.status === 'running' ? (
+                <span className="flex h-2.5 w-2.5 relative shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent"></span>
+                </span>
+              ) : (
+                <span className="text-ok shrink-0">✓</span>
+              )}
+              <span className="truncate text-ink">{s.label}</span>
+            </div>
+
+            {s.args && (
+              <div className="bg-bg0/80 rounded-lg p-2 font-mono text-[10px] text-inkDim overflow-x-auto whitespace-pre-wrap max-h-24">
+                <span className="text-accent2">Input:</span> {getArgsString(s.args)}
+              </div>
+            )}
+
+            {s.result && (
+              <div className="bg-bg0/40 rounded-lg p-2 font-mono text-[10px] text-inkXdim overflow-x-auto whitespace-pre-wrap max-h-24 border border-line/40">
+                <span className="text-ok">Output:</span> {getResultString(s.result)}
+              </div>
+            )}
+          </MotionDiv>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ── แท็บ 2: เอเจนต์ ─────────────────────────────────────────────────────────
 // msgs/ctxUser ยกขึ้นไปไว้ที่ App → สลับแท็บแล้วบทสนทนาไม่หาย (อยู่จน refresh หน้า)
 function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState([]);
   const boxRef = useRef(null);
+  const wsRef = useRef(null);
 
-  useEffect(() => { if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight; }, [msgs, busy]);
+  useEffect(() => {
+    if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
+  }, [msgs, busy]);
 
-  const send = async (e) => {
+  // เคลียร์ WS เมื่อปิดหน้านี้
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, []);
+
+  const send = (e) => {
     e.preventDefault();
     const task = input.trim();
     if (!task || busy) return;
     setInput('');
-    // ประวัติที่ส่งไปให้ agent จำบริบท (ก่อนเพิ่มข้อความใหม่) — เอาเฉพาะ user/agent
-    const history = msgs.filter((m) => m.role === 'user' || m.role === 'agent').map((m) => ({ role: m.role, text: m.text }));
-    setMsgs((m) => [...m, { role: 'user', text: task }]);
     setBusy(true);
-    try {
-      const r = await api('/admin/api/agent', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, user_id: ctxUser || null, history }),
-      });
-      setMsgs((m) => [...m, { role: 'agent', text: r.reply || '[ไม่มีการตอบกลับ]' }]);
-    } catch (err) {
-      if (err.message !== 'unauthorized') setMsgs((m) => [...m, { role: 'sys', text: 'เกิดข้อผิดพลาด: ' + err.message }]);
-    } finally { setBusy(false); }
+    setSteps([{ id: 'init', name: 'Plan', label: '🧠 กำลังวิเคราะห์และวางแผนงาน...', status: 'running' }]);
+
+    const history = msgs
+      .filter((m) => m.role === 'user' || m.role === 'agent')
+      .map((m) => ({ role: m.role, text: m.text }));
+
+    setMsgs((m) => [...m, { role: 'user', text: task }]);
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const token = localStorage.getItem('admin_token') || TOKEN;
+    const q = token ? '?token=' + encodeURIComponent(token) : '';
+    const ws = new WebSocket(`${proto}//${location.host}/admin/ws/agent${q}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ task, user_id: ctxUser || null, history }));
+    };
+
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (data.type === 'tool_start') {
+          setSteps((prev) => {
+            const next = prev.map(s => s.id === 'init' ? { ...s, status: 'success', label: '🧠 วางแผนงานสำเร็จ' } : s);
+            return [...next, {
+              id: 'tool-' + Date.now() + '-' + Math.random(),
+              name: data.name,
+              label: `🔧 เรียกใช้: ${data.name}`,
+              args: data.args,
+              status: 'running'
+            }];
+          });
+        }
+        else if (data.type === 'tool_end') {
+          setSteps((prev) => prev.map((s) => 
+            s.name === data.name && s.status === 'running'
+              ? { ...s, status: 'success', label: `✓ ทำงาน ${data.name} สำเร็จ`, result: data.result }
+              : s
+          ));
+        }
+        else if (data.type === 'reply_start') {
+          setSteps((prev) => {
+            const next = prev.map(s => s.status === 'running' ? { ...s, status: 'success' } : s);
+            return [...next, {
+              id: 'reply-init',
+              name: 'Reply',
+              label: '✍️ กำลังเรียบเรียงคำตอบสุดท้าย...',
+              status: 'running'
+            }];
+          });
+          setMsgs((m) => [...m, { role: 'agent', text: '', streaming: true }]);
+        }
+        else if (data.type === 'reply_chunk') {
+          setMsgs((prev) => {
+            const next = [...prev];
+            if (next.length > 0 && next[next.length - 1].role === 'agent') {
+              next[next.length - 1].text += data.text;
+            }
+            return next;
+          });
+        }
+        else if (data.type === 'reply_end') {
+          setSteps((prev) => prev.map((s) => s.id === 'reply-init' ? { ...s, status: 'success', label: '✓ ตอบกลับสำเร็จ' } : s));
+          setMsgs((prev) => {
+            const next = [...prev];
+            if (next.length > 0 && next[next.length - 1].role === 'agent') {
+              next[next.length - 1].text = data.reply;
+              next[next.length - 1].streaming = false;
+            }
+            return next;
+          });
+          setBusy(false);
+          ws.close();
+        }
+        else if (data.type === 'error') {
+          setMsgs((m) => [...m, { role: 'sys', text: 'เกิดข้อผิดพลาด: ' + data.error }]);
+          setBusy(false);
+          ws.close();
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    ws.onerror = () => {
+      setMsgs((m) => [...m, { role: 'sys', text: 'การเชื่อมต่อ WebSocket สำหรับ Agent ขัดข้อง' }]);
+      setBusy(false);
+    };
+
+    ws.onclose = () => {
+      setBusy(false);
+    };
   };
 
   const bubble = (m, i) => {
@@ -437,57 +609,65 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
   };
 
   return (
-    <Card className="p-4 sm:p-5 flex flex-col h-[76vh]">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
-        <div className="flex items-center gap-2">
-          <img src="/admin/static/syn_icon_2.jpg" alt="ซิน" className="w-8 h-8 rounded-full object-cover glow-accent shrink-0" />
-          <h2 className="font-semibold">สั่งการเอเจนต์ (Agent Shell)</h2>
-          <button onClick={() => setMsgs([{ role: 'sys', text: 'เริ่มบทสนทนาใหม่แล้ว — พิมพ์คำสั่งให้เอเจนต์ได้เลย' }])}
-            title="ล้างประวัติบทสนทนา"
-            className="text-xs px-2.5 py-1 rounded-lg border border-line text-inkDim hover:text-danger hover:border-danger/40 transition">
-            ล้างประวัติ
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 h-[76vh]">
+      {/* ฝั่งแชทบับเบิ้ล */}
+      <Card className="p-4 sm:p-5 flex flex-col h-full border border-line">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
+          <div className="flex items-center gap-2">
+            <img src="/admin/static/syn_icon_2.jpg" alt="ซิน" className="w-8 h-8 rounded-full object-cover glow-accent shrink-0" />
+            <h2 className="font-semibold text-sm">สั่งการเอเจนต์ (Agent Shell)</h2>
+            <button onClick={() => { setMsgs([{ role: 'sys', text: 'เริ่มบทสนทนาใหม่แล้ว — พิมพ์คำสั่งให้เอเจนต์ได้เลย' }]); setSteps([]); }}
+              title="ล้างประวัติบทสนทนา"
+              className="text-xs px-2.5 py-1 rounded-lg border border-line text-inkDim hover:text-danger hover:border-danger/40 transition">
+              ล้างแชท
+            </button>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-inkDim whitespace-nowrap">โฟกัสที่ผู้ใช้:</span>
+            <select value={ctxUser} onChange={(e) => setCtxUser(e.target.value)}
+              className="bg-bg1/70 border border-line rounded-lg px-2 py-1.5 outline-none focus:border-accent max-w-[60vw] sm:max-w-xs"
+              title="เลือกคน = สั่งงาน/คุยในบริบทของคนนั้น · อัตโนมัติ = ให้ซินเลือกคนเองจากคำสั่ง">
+              <option value="">— อัตโนมัติ (ซินเลือกคนเอง) —</option>
+              {Object.keys(users).map((uid) => <option key={uid} value={uid}>{users[uid].app_name || 'แอป'} ({uid})</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div ref={boxRef} className="flex-1 overflow-y-auto flex flex-col gap-3 py-4">
+          {!msgs.some((m) => m.role === 'user' || m.role === 'agent') ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 px-6">
+              <img src="/admin/static/syn_icon_2.jpg" alt="ซิน" className="w-24 h-24 rounded-full object-cover glow-accent" />
+              <div className="text-base font-semibold">สั่งการระบบกลาง SynaptaOS</div>
+              <p className="text-xs text-inkDim max-w-sm">พิมพ์คำสั่งภาษาคนเพื่อให้เอเจนต์ทำงานบนเครื่องนี้ได้เลยค่ะ เช่น “เปิดโปรแกรมเล่นเพลง” หรือ “เช็คระบบหลังบ้านหน่อย”</p>
+            </div>
+          ) : msgs.map(bubble)}
+          {busy && !msgs.some(m => m.role === 'agent' && m.streaming) && (
+            <div className="self-start glass-soft rounded-xl2 px-4 py-3 flex items-center gap-1.5 text-sm text-inkDim">
+              <span className="think-dot w-2 h-2 rounded-full bg-accent" />
+              <span className="think-dot w-2 h-2 rounded-full bg-accent" />
+              <span className="think-dot w-2 h-2 rounded-full bg-accent" />
+              <span className="ml-2">เอเจนต์กำลังเริ่มวางแผนงาน...</span>
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={send} className="flex items-center gap-2 pt-3 border-t border-line">
+          <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy}
+            placeholder="พิมพ์สิ่งที่ต้องการให้ระบบทำ..."
+            className="flex-1 bg-bg1/70 border border-line rounded-xl2 px-4 py-3 outline-none focus:border-accent transition disabled:opacity-60 text-sm" />
+          <button type="submit" disabled={busy || !input.trim()}
+            className="px-4 py-3 rounded-xl2 font-semibold text-bg0 disabled:opacity-60 transition hover:brightness-110 flex items-center gap-2 text-sm"
+            style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>
+            <Icon path={ICONS.send} className="w-4 h-4" /><span className="hidden sm:inline">ส่ง</span>
           </button>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-inkDim whitespace-nowrap">โฟกัสที่ผู้ใช้:</span>
-          <select value={ctxUser} onChange={(e) => setCtxUser(e.target.value)}
-            className="bg-bg1/70 border border-line rounded-lg px-2 py-1.5 outline-none focus:border-accent max-w-[60vw] sm:max-w-xs"
-            title="เลือกคน = สั่งงาน/คุยในบริบทของคนนั้น · อัตโนมัติ = ให้ซินเลือกคนเองจากคำสั่ง">
-            <option value="">— อัตโนมัติ (ซินเลือกคนเอง) —</option>
-            {Object.keys(users).map((uid) => <option key={uid} value={uid}>{users[uid].app_name || 'แอป'} ({uid})</option>)}
-          </select>
-        </div>
-      </div>
+        </form>
+      </Card>
 
-      <div ref={boxRef} className="flex-1 overflow-y-auto flex flex-col gap-3 py-4">
-        {!msgs.some((m) => m.role === 'user' || m.role === 'agent') ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 px-6">
-            <img src="/admin/static/syn_icon_2.jpg" alt="ซิน" className="w-28 h-28 rounded-full object-cover glow-accent" />
-            <div className="text-base font-semibold">สั่งการระบบ SynaptaOS</div>
-            <div className="text-sm text-inkDim max-w-sm">พิมพ์คำสั่งให้เอเจนต์ทำงานบนเครื่องนี้ได้เลย เช่น “เปิดเพลง lofi” หรือ “ดูพื้นที่ดิสก์ที่เหลือ”</div>
-          </div>
-        ) : msgs.map(bubble)}
-        {busy && (
-          <div className="self-start glass-soft rounded-xl2 px-4 py-3 flex items-center gap-1.5 text-sm text-inkDim">
-            <span className="think-dot w-2 h-2 rounded-full bg-accent" />
-            <span className="think-dot w-2 h-2 rounded-full bg-accent" />
-            <span className="think-dot w-2 h-2 rounded-full bg-accent" />
-            <span className="ml-2">เอเจนต์กำลังคิด...</span>
-          </div>
-        )}
-      </div>
-
-      <form onSubmit={send} className="flex items-center gap-2 pt-3 border-t border-line">
-        <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy}
-          placeholder="พิมพ์สิ่งที่ต้องการให้ระบบทำ..."
-          className="flex-1 bg-bg1/70 border border-line rounded-xl2 px-4 py-3 outline-none focus:border-accent transition disabled:opacity-60" />
-        <button type="submit" disabled={busy}
-          className="px-4 py-3 rounded-xl2 font-semibold text-bg0 disabled:opacity-60 transition hover:brightness-110 flex items-center gap-2"
-          style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>
-          <Icon path={ICONS.send} className="w-4 h-4" /><span className="hidden sm:inline">ส่ง</span>
-        </button>
-      </form>
-    </Card>
+      {/* ฝั่งแดชบอร์ดแสดงผลกระบวนการทำงานเครื่องมือ (Timeline Flow) */}
+      <Card className="p-4 sm:p-5 flex flex-col h-full border border-line overflow-hidden">
+        <AgentStepsFlow steps={steps} />
+      </Card>
+    </div>
   );
 }
 
@@ -609,63 +789,22 @@ function SettingsTab({ onTokenSaved }) {
 }
 
 // ── แท็บ: ตำแหน่ง (Location) ─────────────────────────────────────────────────
-// โชว์พิกัด lat/lng ของแต่ละ user (มาจาก telemetry ที่ background process ส่งขึ้นมา)
-// + แผนที่ OpenStreetMap แบบ embed (ไม่ต้องใช้ API key — รันบน RPi ได้ตรง ๆ)
-const osmEmbed = (lat, lng) => {
-  const d = 0.008;
-  const bbox = `${lng - d},${lat - d},${lng + d},${lat + d}`;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lng}`;
-};
+// โชว์พิกัด lat/lng ของทุกคนบนแผนที่เดียวแบบ Premium Dark Theme
+// พร้อมหน้าต่างควบคุมสำหรับเลือกส่งคำสั่ง/ข้อความหาแอปนั้นๆ โดยตรง
 const gmapsLink = (lat, lng) => `https://www.google.com/maps?q=${lat},${lng}`;
 
-function LocationCard({ uid, user, phone }) {
-  const lat = phone && typeof phone.lat === 'number' ? phone.lat : null;
-  const lng = phone && typeof phone.lng === 'number' ? phone.lng : null;
-  const has = lat !== null && lng !== null;
-  return (
-    <Card className="p-4 fade-in">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="min-w-0">
-          <div className="font-medium truncate">{(user && user.app_name) || 'แอปนิรนาม'}</div>
-          <div className="text-xs text-inkDim font-mono truncate">{uid}</div>
-        </div>
-        {phone && phone.moving
-          ? <Badge color="accent">กำลังเคลื่อนที่</Badge>
-          : <Badge color="dim">อยู่นิ่ง</Badge>}
-      </div>
-
-      {has ? (
-        <>
-          <div className="rounded-xl2 overflow-hidden border border-line mb-3">
-            <iframe title={'map-' + uid} className="w-full h-52" loading="lazy"
-              src={osmEmbed(lat, lng)} style={{ border: 0 }} />
-          </div>
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            <div className="glass-soft rounded-xl2 p-2.5">
-              <div className="text-[10px] uppercase tracking-wide text-accent mb-0.5">Latitude</div>
-              <div className="font-mono text-sm">{lat.toFixed(6)}</div>
-            </div>
-            <div className="glass-soft rounded-xl2 p-2.5">
-              <div className="text-[10px] uppercase tracking-wide text-accent mb-0.5">Longitude</div>
-              <div className="font-mono text-sm">{lng.toFixed(6)}</div>
-            </div>
-          </div>
-          <div className="flex items-center justify-between text-xs text-inkDim">
-            <span>🔋 {phone && phone.level !== undefined ? phone.level + '%' : '—'}{phone && phone.charging ? ' ⚡' : ''}</span>
-            <a href={gmapsLink(lat, lng)} target="_blank" rel="noreferrer"
-              className="text-accent hover:underline">เปิดใน Google Maps →</a>
-          </div>
-        </>
-      ) : (
-        <div className="text-sm text-inkXdim py-8 text-center">ยังไม่มีพิกัด (ผู้ใช้อาจปิดตำแหน่ง หรือยังไม่ส่ง telemetry)</div>
-      )}
-    </Card>
-  );
-}
-
-function LocationTab({ users, liveUpdate }) {
+function LocationTab({ users, liveUpdate, activeTab }) {
   const [locs, setLocs] = useState({}); // uid → phone data
   const [loading, setLoading] = useState(true);
+  const [selectedUid, setSelectedUid] = useState(null);
+  const [msgText, setMsgText] = useState('');
+  const [msgType, setMsgType] = useState('chat'); // 'chat' or 'action'
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState(null);
+
+  const mapRef = useRef(null);
+  const containerRef = useRef(null);
+  const markersRef = useRef({});
   const ids = Object.keys(users);
 
   const loadAll = useCallback(async () => {
@@ -680,26 +819,339 @@ function LocationTab({ users, liveUpdate }) {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // อัปเดตสด: telemetry ของใครเข้ามา → ขยับหมุดคนนั้นทันที
+  // อัปเดตพิกัดสด
   useEffect(() => {
     if (liveUpdate && liveUpdate.kind === 'phone') {
       setLocs((prev) => ({ ...prev, [liveUpdate.user_id]: liveUpdate.data }));
     }
   }, [liveUpdate]);
 
+  // รีเฟรชแผนที่เมื่อสลับแท็บกลับมา
+  useEffect(() => {
+    if (activeTab === 'location' && mapRef.current) {
+      setTimeout(() => {
+        if (mapRef.current) {
+          mapRef.current.invalidateSize({ animate: true });
+          // จัดมุมกล้องให้ครอบคลุมทุกคนถ้าไม่ได้เจาะจงใคร
+          if (!selectedUid) {
+            const bounds = [];
+            Object.values(locs).forEach((phone) => {
+              if (phone && typeof phone.lat === 'number' && typeof phone.lng === 'number') {
+                bounds.push([phone.lat, phone.lng]);
+              }
+            });
+            if (bounds.length > 0) {
+              mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+            }
+          }
+        }
+      }, 100);
+    }
+  }, [activeTab, locs, selectedUid]);
+
+  // สร้างแผนที่ Leaflet
+  useEffect(() => {
+    if (!window.L || !containerRef.current || loading) return;
+
+    if (!mapRef.current) {
+      const map = L.map(containerRef.current, {
+        center: [13.7563, 100.5018],
+        zoom: 6,
+        zoomControl: false
+      });
+      L.control.zoom({ position: 'topright' }).addTo(map);
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CartoDB',
+        subdomains: 'abcd',
+        maxZoom: 20
+      }).addTo(map);
+
+      mapRef.current = map;
+    }
+
+    const map = mapRef.current;
+
+    // เคลียร์หมุดเก่า
+    Object.values(markersRef.current).forEach((m) => m.remove());
+    markersRef.current = {};
+
+    const bounds = [];
+    Object.entries(locs).forEach(([uid, phone]) => {
+      if (!phone || typeof phone.lat !== 'number' || typeof phone.lng !== 'number') return;
+      const lat = phone.lat;
+      const lng = phone.lng;
+      bounds.push([lat, lng]);
+
+      const user = users[uid] || {};
+      const name = user.displayName || user.app_name || 'ผู้ใช้แอป';
+      const moving = phone.moving;
+      const bat = phone.level !== undefined ? `${phone.level}%` : '';
+
+      const customIcon = L.divIcon({
+        html: `
+          <div class="relative flex flex-col items-center">
+            ${moving ? '<span class="absolute top-1 inline-flex h-6 w-6 rounded-full bg-cyan-400/40 animate-ping"></span>' : ''}
+            <div class="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-[#00D4FF] to-[#B44FFF] border-2 border-[#080B12] shadow-md relative z-10 flex items-center justify-center">
+              <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
+            </div>
+            <div class="mt-1 px-2 py-0.5 rounded-md bg-[#10141F]/90 border border-[#2A3142] text-[10px] font-semibold text-[#EEF1F5] shadow-md whitespace-nowrap select-none">
+              ${name} ${bat ? `(${bat})` : ''}
+            </div>
+          </div>
+        `,
+        className: 'custom-leaflet-marker',
+        iconSize: [60, 40],
+        iconAnchor: [30, 7]
+      });
+
+      const marker = L.marker([lat, lng], { icon: customIcon }).addTo(map);
+      marker.on('click', () => {
+        setSelectedUid(uid);
+        setSendResult(null);
+        map.setView([lat, lng], Math.max(map.getZoom(), 14), { animate: true });
+      });
+      markersRef.current[uid] = marker;
+    });
+
+    if (bounds.length > 0 && !selectedUid) {
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [loading, locs, users]);
+
+  // ซูมเข้าหาผู้ใช้ที่ถูกเลือก
+  useEffect(() => {
+    if (selectedUid && mapRef.current) {
+      const phone = locs[selectedUid];
+      if (phone && typeof phone.lat === 'number' && typeof phone.lng === 'number') {
+        mapRef.current.setView([phone.lat, phone.lng], Math.max(mapRef.current.getZoom(), 14), { animate: true });
+      }
+    }
+  }, [selectedUid, locs]);
+
+  // ส่งข้อความ/คำสั่งหาแอปผ่าน FCM
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    if (!selectedUid || !msgText.trim() || sending) return;
+    setSending(true);
+    setSendResult(null);
+    try {
+      const res = await api(`/admin/api/users/${selectedUid}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msgText.trim(), type: msgType })
+      });
+      setSendResult({ ok: true, text: `✓ ${res.result || 'ส่งสำเร็จ'}` });
+      setMsgText('');
+    } catch (err) {
+      setSendResult({ ok: false, text: `✗ ส่งไม่สำเร็จ: ${err.message}` });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const selectedUser = users[selectedUid];
+  const selectedPhone = locs[selectedUid];
+  const hasGps = selectedPhone && typeof selectedPhone.lat === 'number' && typeof selectedPhone.lng === 'number';
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold">ตำแหน่งผู้ใช้ ({ids.length})</h2>
-        <button onClick={loadAll} title="โหลดใหม่"
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-inkDim hover:text-accent hover:bg-white/5 transition">
+    <div className="flex flex-col gap-4">
+      <style>{`
+        .leaflet-container {
+          background-color: #080B12 !important;
+          font-family: inherit !important;
+        }
+        .leaflet-bar {
+          border: 1px solid rgba(42, 49, 66, 0.6) !important;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+          border-radius: 8px !important;
+          overflow: hidden;
+        }
+        .leaflet-bar a {
+          background-color: rgba(20, 25, 37, 0.9) !important;
+          color: #EEF1F5 !important;
+          border-bottom: 1px solid rgba(42, 49, 66, 0.6) !important;
+          transition: all 0.2s;
+        }
+        .leaflet-bar a:hover {
+          background-color: #00D4FF !important;
+          color: #080B12 !important;
+        }
+        .leaflet-popup-content-wrapper {
+          background: rgba(26, 32, 48, 0.9) !important;
+          backdrop-filter: blur(12px) !important;
+          border: 1px solid rgba(58, 66, 86, 0.6) !important;
+          color: #EEF1F5 !important;
+          border-radius: 12px !important;
+        }
+        .leaflet-popup-tip {
+          background: rgba(26, 32, 48, 0.9) !important;
+        }
+      `}</style>
+
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-lg flex items-center gap-2">
+          <span>📍</span> แผนที่ระบบระบุตำแหน่งรวม (Unified GPS Dashboard)
+        </h2>
+        <button onClick={loadAll} title="โหลดข้อมูลทั้งหมดใหม่"
+          className="w-9 h-9 flex items-center justify-center rounded-xl2 bg-white/5 text-inkDim hover:text-accent hover:bg-white/10 transition border border-line">
           <Icon path={ICONS.refresh} className="w-4 h-4" />
         </button>
       </div>
-      {loading ? <Spinner /> : ids.length === 0 ? <Spinner text="ไม่พบผู้ใช้ในระบบ" />
-        : <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {ids.map((uid) => <LocationCard key={uid} uid={uid} user={users[uid]} phone={locs[uid]} />)}
-        </div>}
+
+      {loading ? (
+        <Spinner text="กำลังโหลดแผนที่และพิกัดผู้ใช้..." />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
+          {/* ส่วนแสดงแผนที่ Leaflet */}
+          <Card className="p-2 relative h-[50vh] lg:h-[68vh] overflow-hidden flex flex-col border border-line">
+            <div ref={containerRef} className="w-full h-full rounded-xl2" style={{ minHeight: '350px' }} />
+          </Card>
+
+          {/* แผงควบคุมและส่งข้อความหาแอป */}
+          <Card className="p-5 flex flex-col justify-between h-fit lg:h-[68vh] border border-line gap-4 font-sans">
+            {!selectedUid ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center py-10 text-inkDim gap-4 fade-in">
+                <div className="w-16 h-16 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent text-3xl">📍</div>
+                <div>
+                  <div className="font-semibold text-ink text-base">คลิกเลือกผู้ใช้งาน</div>
+                  <p className="text-xs mt-1 text-inkDim max-w-[280px]">
+                    จิ้มที่หมุดบนแผนที่ หรือเลือกรายชื่อผู้ใช้ด้านล่าง เพื่อดูรายละเอียดเชิงลึกและส่งข้อความหาผู้ช่วยได้ทันทีค่ะ
+                  </p>
+                </div>
+
+                <div className="w-full border-t border-line mt-4 pt-4 flex flex-col gap-2 max-h-[30vh] overflow-y-auto">
+                  <div className="text-[11px] uppercase tracking-wide text-accent font-semibold text-left mb-1">รายชื่อผู้ใช้ระบบในปัจจุบัน</div>
+                  {ids.length === 0 ? (
+                    <div className="text-xs text-inkXdim py-4">ยังไม่มีผู้ใช้งานลงทะเบียน</div>
+                  ) : (
+                    ids.map((uid) => {
+                      const user = users[uid] || {};
+                      const phone = locs[uid];
+                      const activeGPS = phone && typeof phone.lat === 'number' && typeof phone.lng === 'number';
+                      return (
+                        <button key={uid} onClick={() => setSelectedUid(uid)}
+                          className="flex items-center justify-between p-3 rounded-xl2 bg-bg1/40 hover:bg-white/5 border border-line text-left transition text-xs">
+                          <span className="font-medium text-ink truncate max-w-[170px]">{user.displayName || user.app_name || 'แอปนิรนาม'}</span>
+                          <span className={activeGPS ? 'text-ok font-semibold' : 'text-inkXdim'}>
+                            {activeGPS ? '📍 มีพิกัด' : '❌ ไม่มีพิกัด'}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col justify-between gap-4 fade-in h-full">
+                {/* ข้อมูลผู้ใช้ */}
+                <div className="flex flex-col gap-3.5">
+                  <div className="flex justify-between items-start border-b border-line pb-3">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-ink text-base truncate">{(selectedUser && selectedUser.displayName) || (selectedUser && selectedUser.app_name) || 'แอปนิรนาม'}</h3>
+                      <p className="text-[10px] text-inkDim font-mono truncate mt-0.5">{selectedUid}</p>
+                    </div>
+                    <button onClick={() => { setSelectedUid(null); setSendResult(null); }}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/10 text-inkDim hover:text-ink transition border border-line text-xs font-semibold">
+                      ✕
+                    </button>
+                  </div>
+
+                  {hasGps ? (
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="glass-soft rounded-xl2 p-3 border border-line">
+                        <div className="text-[10px] uppercase tracking-wide text-accent font-medium mb-1">Latitude</div>
+                        <div className="font-mono text-ink text-sm font-semibold">{selectedPhone.lat.toFixed(6)}</div>
+                      </div>
+                      <div className="glass-soft rounded-xl2 p-3 border border-line">
+                        <div className="text-[10px] uppercase tracking-wide text-accent font-medium mb-1">Longitude</div>
+                        <div className="font-mono text-ink text-sm font-semibold">{selectedPhone.lng.toFixed(6)}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs bg-danger/10 border border-danger/20 rounded-xl2 p-3 text-danger text-center">
+                      ⚠️ ยังไม่ได้รับพิกัด GPS ปัจจุบันของผู้ใช้คนนี้
+                    </div>
+                  )}
+
+                  {/* สรุปสถานะทางร่างกายและมือถือ */}
+                  <div className="glass-soft rounded-xl2 p-3 border border-line flex flex-col gap-2 text-xs text-inkDim">
+                    <div className="flex justify-between">
+                      <span>สถานะการเคลื่อนที่:</span>
+                      <span className="font-semibold">
+                        {selectedPhone && selectedPhone.moving ? (
+                          <Badge color="accent">กำลังเคลื่อนไหว 🏃</Badge>
+                        ) : (
+                          <Badge color="dim">อยู่นิ่ง 📍</Badge>
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span>ระดับแบตเตอรี่:</span>
+                      <span className="font-semibold text-ink">
+                        🔋 {selectedPhone && selectedPhone.level !== undefined ? `${selectedPhone.level}%` : '—'}
+                        {selectedPhone && selectedPhone.charging ? ' ⚡ (ชาร์จอยู่)' : ''}
+                      </span>
+                    </div>
+                    {hasGps && (
+                      <div className="flex justify-end mt-1 border-t border-line/40 pt-2">
+                        <a href={gmapsLink(selectedPhone.lat, selectedPhone.lng)} target="_blank" rel="noreferrer"
+                          className="text-accent hover:underline text-[11px] font-semibold flex items-center gap-1">
+                          🌐 เปิดดูบน Google Maps →
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* กล่องส่ง FCM ถึงแอป */}
+                <form onSubmit={sendMessage} className="flex flex-col gap-3 border-t border-line pt-4">
+                  <div className="text-xs uppercase tracking-wide text-accent2 font-semibold">💬 ส่งข้อความ/คำสั่งหาผู้ช่วย (FCM)</div>
+                  
+                  <textarea value={msgText} onChange={(e) => setMsgText(e.target.value)} disabled={sending}
+                    placeholder="พิมพ์สารเพื่อสั่งงานหรือทักทายแอปผู้ช่วยคนนี้..." rows={3}
+                    className="w-full bg-bg1/70 border border-line rounded-xl2 px-3.5 py-2.5 outline-none focus:border-accent2 transition text-xs text-ink placeholder:text-inkXdim disabled:opacity-60 resize-none" />
+
+                  <div className="flex items-center justify-between gap-2 text-xs text-inkDim">
+                    <span className="shrink-0">ประเภทคำสั่ง:</span>
+                    <div className="flex gap-2">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="radio" name="cmd_type" value="chat" checked={msgType === 'chat'} onChange={() => setMsgType('chat')} disabled={sending}
+                          className="accent-accent2" />
+                        <span>แชทคุย (Chat)</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="radio" name="cmd_type" value="action" checked={msgType === 'action'} onChange={() => setMsgType('action')} disabled={sending}
+                          className="accent-accent2" />
+                        <span>สั่งงาน (Action)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {sendResult && (
+                    <div className={`text-[11px] text-center p-2 rounded-lg font-medium ${sendResult.ok ? 'bg-ok/10 text-ok border border-ok/20' : 'bg-danger/10 text-danger border border-danger/20'}`}>
+                      {sendResult.text}
+                    </div>
+                  )}
+
+                  <button type="submit" disabled={sending || !msgText.trim()}
+                    className="w-full py-2.5 rounded-xl2 font-semibold text-bg0 disabled:opacity-50 transition hover:brightness-110 flex items-center justify-center gap-1 text-xs"
+                    style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>
+                    {sending ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-bg0/40 border-t-bg0 rounded-full animate-spin"></span>
+                        <span>กำลังนำส่ง...</span>
+                      </>
+                    ) : (
+                      <span>🚀 ส่งข้อความหาแอป</span>
+                    )}
+                  </button>
+                </form>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
@@ -796,7 +1248,7 @@ function App() {
           <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />
         </div>
         <div style={{ display: tab === 'location' ? '' : 'none' }}>
-          <LocationTab users={users} liveUpdate={liveUpdate} />
+          <LocationTab users={users} liveUpdate={liveUpdate} activeTab={tab} />
         </div>
         <div style={{ display: tab === 'agent' ? '' : 'none' }}>
           <AgentTab users={users} msgs={agentMsgs} setMsgs={setAgentMsgs} ctxUser={agentCtxUser} setCtxUser={setAgentCtxUser} />

@@ -28,27 +28,37 @@ _started_at = 0  # epoch ตอน Hub เริ่มรอบนี้ — App
 HEARTBEAT_SEC = 15
 
 
+_cached_ip = None
+
+
 def tailscale_ip() -> str:
     """อ่าน Tailscale IPv4 (100.x). หาไม่เจอ → fallback เป็น LAN IP ของเครื่อง"""
+    global _cached_ip
+    if _cached_ip:
+        return _cached_ip
+
+    ip = ""
     try:
         out = subprocess.run(
             ["tailscale", "ip", "-4"],
             capture_output=True, text=True, timeout=5,
         ).stdout.strip()
         ip = out.splitlines()[0].strip() if out else ""
-        if ip:
-            return ip
     except Exception:
         pass
-    # fallback — เครื่องไม่มี tailscale (เช่นตอน dev/test)
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
+
+    if not ip:
+        # fallback — เครื่องไม่มี tailscale (เช่นตอน dev/test)
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            ip = "127.0.0.1"
+
+    _cached_ip = ip
+    return ip
 
 
 def _status_payload(status: str, host: str) -> str:
