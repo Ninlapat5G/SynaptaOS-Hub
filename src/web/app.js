@@ -440,6 +440,7 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
     <Card className="p-4 sm:p-5 flex flex-col h-[76vh]">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line">
         <div className="flex items-center gap-2">
+          <img src="/admin/static/syn_icon_2.jpg" alt="ซิน" className="w-8 h-8 rounded-full object-cover glow-accent shrink-0" />
           <h2 className="font-semibold">สั่งการเอเจนต์ (Agent Shell)</h2>
           <button onClick={() => setMsgs([{ role: 'sys', text: 'เริ่มบทสนทนาใหม่แล้ว — พิมพ์คำสั่งให้เอเจนต์ได้เลย' }])}
             title="ล้างประวัติบทสนทนา"
@@ -459,7 +460,13 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
       </div>
 
       <div ref={boxRef} className="flex-1 overflow-y-auto flex flex-col gap-3 py-4">
-        {msgs.map(bubble)}
+        {!msgs.some((m) => m.role === 'user' || m.role === 'agent') ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 px-6">
+            <img src="/admin/static/syn_icon_2.jpg" alt="ซิน" className="w-28 h-28 rounded-full object-cover glow-accent" />
+            <div className="text-base font-semibold">สั่งการระบบ SynaptaOS</div>
+            <div className="text-sm text-inkDim max-w-sm">พิมพ์คำสั่งให้เอเจนต์ทำงานบนเครื่องนี้ได้เลย เช่น “เปิดเพลง lofi” หรือ “ดูพื้นที่ดิสก์ที่เหลือ”</div>
+          </div>
+        ) : msgs.map(bubble)}
         {busy && (
           <div className="self-start glass-soft rounded-xl2 px-4 py-3 flex items-center gap-1.5 text-sm text-inkDim">
             <span className="think-dot w-2 h-2 rounded-full bg-accent" />
