@@ -6,6 +6,7 @@ SynaptaOS Hub — entry point
 """
 
 import logging
+import threading
 
 import config
 import log
@@ -30,33 +31,25 @@ def main():
     print()
     _log.info("Hub เริ่มทำงาน")
 
-    try:
-        discovery.start()
-    except Exception as e:
-        _log.error("discovery start ล้มเหลว (broadcast ปิด): %s", e)
+    # บริการ MQTT/พื้นหลัง (connect broker นานได้) → สตาร์ตใน thread แยก ให้ uvicorn (MCP server)
+    # ขึ้นทันทีพร้อมกัน ไม่ต้องรอ broker ก่อน — App เลยต่อ MCP ได้เร็ว ไม่ค้างรอตอนบูต
+    def _start_services():
+        for name, fn in (
+            ("discovery", discovery.start),
+            ("telemetry", telemetry.start),
+            ("devstate", device_state.start),
+            ("hub_response", hub_response.start),
+            ("automation", automation.start),
+        ):
+            try:
+                fn()
+            except Exception as e:
+                _log.error("%s start ล้มเหลว: %s", name, e)
+
+    threading.Thread(target=_start_services, daemon=True).start()
 
     try:
-        telemetry.start()
-    except Exception as e:
-        _log.error("telemetry start ล้มเหลว (phone telemetry ปิด): %s", e)
-
-    try:
-        device_state.start()
-    except Exception as e:
-        _log.error("devstate start ล้มเหลว (live device state ปิด): %s", e)
-
-    try:
-        hub_response.start()
-    except Exception as e:
-        _log.error("hub_response start ล้มเหลว (รับผลกลับจากแอปปิด): %s", e)
-
-    try:
-        automation.start()
-    except Exception as e:
-        _log.error("automation start ล้มเหลว (งานอัตโนมัติ Hub ปิด): %s", e)
-
-    try:
-        server.run()
+        server.run()   # uvicorn (MCP) — ขึ้นทันที ขนานกับบริการพื้นหลังด้านบน
     finally:
         automation.stop()
         hub_response.stop()
