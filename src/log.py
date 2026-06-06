@@ -14,5 +14,6 @@ def setup() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,   # ทับ config เดิมที่อาจถูกตั้งไว้ก่อน (เช่น import library) ให้ฟอร์แมตเราชนะ
     )

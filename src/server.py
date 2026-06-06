@@ -52,4 +52,7 @@ def run():
     print(f"[Hub] MCP server → http://{config.MCP_HOST}:{config.MCP_PORT}{config.MCP_PATH}")
     print(f"[Hub] Admin panel available at: http://{ip}:{config.MCP_PORT}/admin")
     print(f"[Hub] token guard: {'ON' if config.get_mcp_token() else 'OFF (Tailscale ACL only)'}")
-    uvicorn.run(build_app(), host=config.MCP_HOST, port=config.MCP_PORT, log_level="info")
+    # log_config=None → uvicorn ไม่ตั้ง logging ของตัวเองทับ → log ของ uvicorn propagate
+    # ไปที่ root ที่เราตั้งไว้ (มี timestamp+วันที่) เหมือน log ส่วนอื่นของ Hub
+    uvicorn.run(build_app(), host=config.MCP_HOST, port=config.MCP_PORT,
+                log_level="info", log_config=None)
