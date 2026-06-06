@@ -10,14 +10,17 @@ stateless ต่อ request: cwd เก็บใน box ที่สร้าง
 import json
 import logging
 import threading
+from typing import Literal
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
+from langgraph.errors import GraphRecursionError
 
 import config
 import osprofile
+import session
 from pathlib import Path
 
 _log = logging.getLogger("agent")
@@ -95,6 +98,7 @@ def _context(user_id: str | None) -> str:
         name = prof.get("displayName") or prof.get("app_name") or user_id
         bio = (prof.get("userBio") or "").strip()
         mem = (prof.get("userMemory") or "").strip()
+        hub_mem = (prof.get("hubMemory") or "").strip()   # ความจำที่ Hub สะสมเอง (แยกจากของแอป)
         assistant_name = prof.get("assistantName") or "ซิน"
         system_prompt = (prof.get("systemPrompt") or "").strip()
 
@@ -103,6 +107,8 @@ def _context(user_id: str | None) -> str:
             lines.append(f"เกี่ยวกับเขา: {bio}")
         if mem:
             lines.append(f"สิ่งที่รู้เพิ่มเติม: {mem}")
+        if hub_mem:
+            lines.append(f"สิ่งที่ Hub เคยจำไว้เกี่ยวกับเขา:\n{hub_mem}")
         lines.append(f"แอปผู้ช่วยส่วนตัวบนมือถือของเขาชื่อ: \"{assistant_name}\"")
         if system_prompt:
             lines.append(f"System Prompt / บุคลิกของผู้ช่วย \"{assistant_name}\": \"{system_prompt}\"")
@@ -133,11 +139,13 @@ def _context(user_id: str | None) -> str:
     )
 
 
-def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user_id: str | None):
+def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user_id: str | None,
+                allow_power: bool = False):
     @tool
     def os_exec(command: str) -> str:
         """Execute a terminal command on this computer. Supports cd — directory persists across calls within this task."""
-        return _os_exec.run(command, timeout=timeout, kill_event=kill_event, cwd_box=cwd_box)
+        return _os_exec.run(command, timeout=timeout, kill_event=kill_event, cwd_box=cwd_box,
+                            allow_power=allow_power)
 
     @tool
     def web_search(query: str) -> str:
@@ -187,6 +195,25 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         return f"{name} (id: {uid})\nเกี่ยวกับเขา: {bio}\nสิ่งที่รู้เพิ่มเติม: {mem}"
 
     @tool
+    def remember(user_query: str, note: str) -> str:
+        """จำสิ่งสำคัญเกี่ยวกับผู้ใช้ไว้ใช้ครั้งหน้า เช่นสิ่งที่เขาชอบ ข้อควรระวัง หรือบทเรียนจากงานที่เพิ่งทำ
+        เก็บแยกของแต่ละคน · user_query = ชื่อผู้ใช้ (เว้นว่าง = คนที่กำลังโฟกัสอยู่)"""
+        uid = _resolve(user_query)
+        if not uid:
+            return f"ไม่รู้ว่าจะจำให้ใคร (ไม่พบผู้ใช้ '{user_query}')"
+        note = (note or "").strip()
+        if not note:
+            return "ไม่มีอะไรให้จำค่ะ"
+        prof = store.load_part(uid, "profile") or {}
+        mem = (prof.get("hubMemory") or "").strip()
+        if note in mem:
+            return "จำเรื่องนี้ไว้อยู่แล้วค่ะ"
+        lines = [l for l in mem.split("\n") if l.strip()]
+        lines.append(f"- {note}")
+        store.save_part(uid, "profile", {"hubMemory": "\n".join(lines[-30:])})  # เก็บล่าสุด ~30 บรรทัด กันบวม
+        return "จำไว้ให้แล้วค่ะ ✨"
+
+    @tool
     def read_user_data(user_query: str, kind: str) -> str:
         """อ่านข้อมูลของผู้ใช้คนหนึ่ง: kind = kd (อุปกรณ์ในบ้าน) | scenes | routines | phone | profile
         user_query = ชื่อของผู้ใช้ (จะค้นให้) · เว้นว่าง = คนที่กำลังโฟกัสอยู่"""
@@ -199,16 +226,22 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         # phone (แบต/ตำแหน่ง): แอป publish telemetry ต่อเนื่องผ่าน background process อยู่แล้ว
         # → อ่านจาก store ได้เลย ไม่ต้อง poke ให้แอป push (เลิกใช้ Hub→App ผ่าน MQTT)
         data = store.load_part(uid, kind)
-        # kd: เติมสถานะสด (เปิด/ปิด/ค่า) ที่ Hub sub ตรงจาก MQTT เอง — ไม่ต้องปลุกแอปให้ส่ง
+        # kd: คืนเฉพาะ field ที่ใช้จริง + เติมสถานะสด (เปิด/ปิด/ค่า) ที่ Hub sub ตรงจาก MQTT
+        # ตัด field รก ๆ ออก เพื่อไม่ให้ context บวมจนตัดสินใจเพี้ยน
         if kind == "kd" and isinstance(data, list):
+            slim = []
             for d in data:
+                item = {k: d[k] for k in ("name", "room", "topic", "type", "unit") if d.get(k)}
                 st = device_state.get(d.get("topic", ""))
                 if st is not None:
-                    d["state"] = st
+                    item["state"] = st
+                slim.append(item)
+            return json.dumps(slim, ensure_ascii=False)
         return json.dumps(data, ensure_ascii=False) if data is not None else f"(ไม่มีข้อมูล {kind} ของคนนี้)"
 
     @tool
-    def send_command_to_user_app(user_query: str, command: str, command_type: str) -> str:
+    def send_command_to_user_app(user_query: str, command: str,
+                                 command_type: Literal["chat", "action"]) -> str:
         """ส่งข้อความหรือคำสั่งงานประสานงานแบบ Agent-to-Agent ไปยังเอเจนต์ผู้ช่วยบนแอปมือถือของผู้ใช้คนนั้น
         - user_query: ชื่อจริง/ชื่อเล่น/ไบโอ เพื่อค้นหาคนนั้น (เช่น 'จิม', 'สมใจ') · เว้นว่าง = คนที่กำลังโฟกัสอยู่
         - command: ข้อความคุยหรือคำสั่งที่ฝากให้เอเจนต์ปลายทาง (เช่น ซิน) นำไปบอก/ทำให้ผู้ใช้ต่อ (เช่น 'ซิน ฝากบอกคุณนินว่ามีสายที่ไม่ได้รับสายนะ', 'ซิน ฝากเปิดพัดลมห้องทำงานให้คุณพ่อหน่อยนะ')
@@ -241,7 +274,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         return f"สถานะปัจจุบันของอุปกรณ์ {topic} คือ: {val}"
 
     return [os_exec, web_search, query_system,
-            list_users, find_user, read_user_data, send_command_to_user_app,
+            list_users, find_user, remember, read_user_data, send_command_to_user_app,
             set_device, get_device_state]
 
 
@@ -253,11 +286,18 @@ def run(
     now: str | None = None,
     user_id: str | None = None,
     history: list | None = None,
+    allow_power: bool = False,
 ) -> str:
     os_type    = os_type or config.OS_TYPE
     timeout    = timeout if timeout is not None else config.COMMAND_TIMEOUT
     kill_event = kill_event or threading.Event()
     now        = now or system_info.now_thai()
+
+    # ผู้เรียกไม่ได้แนบประวัติมา (เช่น run_task จาก App) → ใช้ความจำ session ของ Hub เอง
+    # (หน้าเว็บแนบ history ของตัวเองมา = ใช้อันนั้น · automation แนบ [] = ไม่ยุ่งกับ session)
+    use_session = history is None and bool(user_id)
+    if use_session:
+        history = session.get(user_id)
 
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}   # state ต่อ task เดียว
 
@@ -268,9 +308,10 @@ def run(
         now=now,
         examples=examples,
     ) + "\n\n" + system_info.snapshot_text()
-    graph = create_react_agent(_model, _make_tools(kill_event, timeout, cwd_box, user_id), prompt=system_prompt)
+    graph = create_react_agent(
+        _model, _make_tools(kill_event, timeout, cwd_box, user_id, allow_power), prompt=system_prompt)
 
-    # ประวัติบทสนทนา (จากหน้าเว็บ) — ให้ agent จำบริบทที่คุยกันก่อนหน้าได้ (multi-turn)
+    # ประวัติบทสนทนา — ให้ agent จำบริบทที่คุยกันก่อนหน้าได้ (multi-turn)
     msgs = []
     for h in (history or [])[-10:]:  # เอาแค่ 10 ข้อความล่าสุด พอให้จำบริบท ไม่บวม
         role, text = h.get("role"), (h.get("text") or "").strip()
@@ -304,9 +345,17 @@ def run(
                 elif msg.content:
                     final_text = str(msg.content)
                     _log.info("  ตอบ → %s", final_text[:120])
+    except GraphRecursionError:
+        _log.warning("  ชนเพดานจำนวนรอบ (recursion limit) — งานยังไม่จบ")
+        return final_text or "ทำหลายขั้นแล้วแต่ยังไม่เสร็จค่ะ ลองแยกเป็นคำสั่งย่อย ๆ หรือบอกรายละเอียดเพิ่มได้ไหมคะ 🙏"
     except Exception as e:
         _log.error("  ผิดพลาด: %s", e)
         return f"[error] {e}"
+
+    # บันทึกบทสนทนาลง session เพื่อให้ครั้งหน้าคุยต่อเนื่องได้ (จะหมดอายุเองเมื่อเงียบนาน)
+    if final_text and use_session:
+        session.append(user_id, "user", task)
+        session.append(user_id, "agent", final_text)
 
     return final_text or "[no response]"
 
@@ -315,6 +364,7 @@ async def astream_run(
     task: str,
     user_id: str | None = None,
     history: list | None = None,
+    allow_power: bool = False,
 ):
     """
     เธรดสำหรับสตรีมผลการทำงานของเอเจนต์ (async)
@@ -352,7 +402,7 @@ async def astream_run(
 
     graph = create_react_agent(
         local_model,
-        _make_tools(kill_event, timeout, cwd_box, user_id),
+        _make_tools(kill_event, timeout, cwd_box, user_id, allow_power),
         prompt=system_prompt
     )
 
@@ -403,6 +453,9 @@ async def astream_run(
                         yield {"type": "reply_chunk", "text": chunk}
                         await asyncio.sleep(0.01)
                     yield {"type": "reply_end", "reply": full_reply}
+    except GraphRecursionError:
+        _log.warning("  ชนเพดานจำนวนรอบ (recursion limit) — งานยังไม่จบ")
+        yield {"type": "error", "error": "ทำหลายขั้นแล้วแต่ยังไม่เสร็จค่ะ ลองแยกเป็นคำสั่งย่อย ๆ ดูนะคะ 🙏"}
     except Exception as e:
         _log.error("  ผิดพลาด: %s", e)
         yield {"type": "error", "error": str(e)}

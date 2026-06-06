@@ -187,7 +187,8 @@ def mount(app, mcp):
         history = body.get("history") or []  # ประวัติบทสนทนาก่อนหน้า (multi-turn memory)
 
         # เรียกเอเจนต์ด้วย asyncio.to_thread เพื่อไม่ให้กีดกันการทำงานของ Event Loop
-        reply = await asyncio.to_thread(agent.run, task, user_id=user_id_safe, history=history)
+        # หน้าเว็บ = ผู้ดูแลพิมพ์เอง → อนุญาตคำสั่งปิด/รีสตาร์ทเครื่องได้
+        reply = await asyncio.to_thread(agent.run, task, user_id=user_id_safe, history=history, allow_power=True)
         return JSONResponse({"reply": reply})
 
     # 6. API ข้อมูลระบบหลักและเครื่องมือเชื่อมต่อ (MCP Tools)
@@ -348,7 +349,7 @@ def mount(app, mcp):
                 history = data.get("history") or []
                 
                 try:
-                    async for event in agent.astream_run(task, user_id_safe, history):
+                    async for event in agent.astream_run(task, user_id_safe, history, allow_power=True):
                         await websocket.send_text(json.dumps(event, ensure_ascii=False))
                 except Exception as e:
                     await websocket.send_text(json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False))
