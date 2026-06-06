@@ -24,12 +24,41 @@ def verify_token(request: Request) -> bool:
     token = auth[7:] if auth[:7].lower() == "bearer " else ""
     return token == admin_token
 
+active_websockets = []
+main_loop = None
+
+def broadcast_device_state(topic: str, state: str):
+    """ส่งข้อมูลสถานะอุปกรณ์ที่เปลี่ยนไปหาเบราว์เซอร์ทุกตัวแบบ Real-time ทันที"""
+    import json
+    payload = json.dumps({
+        "type": "device_update",
+        "topic": topic,
+        "state": state
+    }, ensure_ascii=False)
+    
+    loop = main_loop
+    if not loop:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+            
+    async def do_broadcast():
+        for ws in list(active_websockets):
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                if ws in active_websockets:
+                    active_websockets.remove(ws)
+                    
+    if loop and loop.is_running():
+        asyncio.run_coroutine_threadsafe(do_broadcast(), loop)
+
 def mount(app, mcp):
     """ทำการเชื่อมโยงเส้นทางของหน้าเว็บควบคุมเข้ากับ Starlette App"""
-    main_loop = None
 
     def capture_loop():
-        nonlocal main_loop
+        global main_loop
         try:
             main_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -278,8 +307,6 @@ def mount(app, mcp):
     # 9. Real-time WebSockets
     from starlette.websockets import WebSocket, WebSocketDisconnect
     import json
-    
-    active_websockets: list[WebSocket] = []
     
     @ws_route("/admin/ws")
     async def websocket_endpoint(websocket: WebSocket):

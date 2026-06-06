@@ -129,6 +129,11 @@ def start() -> None:
         _state[rel] = {"value": val, "ts": int(time.time())}
         _dirty = True
         _log.info("อุปกรณ์ %s = %s", rel, val)
+        try:
+            import webadmin
+            webadmin.broadcast_device_state(rel, val)
+        except Exception as e:
+            _log.error("Failed to broadcast device state: %s", e)
 
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect

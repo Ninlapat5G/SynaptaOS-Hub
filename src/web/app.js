@@ -345,11 +345,26 @@ function DevicesTab() {
     fetchDevices(true);
     const interval = setInterval(() => {
       fetchDevices(false);
-    }, 3000);
+    }, 6000); // websocket คอยดันให้สดเสมออยู่แล้ว ปรับ polling เป็น 6 วินาทีเพื่อความเซฟ
     return () => clearInterval(interval);
   }, [fetchDevices]);
 
+  useEffect(() => {
+    const handleDeviceUpdate = (e) => {
+      const { topic, state } = e.detail;
+      setDevices((prev) => 
+        prev.map(d => d.topic === topic ? { ...d, state: state } : d)
+      );
+    };
+    window.addEventListener('syn-device-update', handleDeviceUpdate);
+    return () => window.removeEventListener('syn-device-update', handleDeviceUpdate);
+  }, []);
+
   const handleControl = async (topic, value) => {
+    // อัปเดต UI ทันทีในเครื่องแบบ Optimistic (ความรู้สึกตอบสนองทันที 0ms)
+    setDevices((prev) => 
+      prev.map(d => d.topic === topic ? { ...d, state: value } : d)
+    );
     setBusyTopic(topic);
     try {
       await api('/admin/api/devices/control', {
@@ -357,9 +372,9 @@ function DevicesTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic, value })
       });
-      await fetchDevices(false);
     } catch (e) {
       alert('ควบคุมอุปกรณ์ล้มเหลว: ' + e.message);
+      fetchDevices(false); // โหลดใหม่เมื่อเกิดข้อผิดพลาดจริง
     } finally {
       setBusyTopic(null);
     }
@@ -556,15 +571,21 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
   const [err, setErr] = useState('');
 
   const handleDeviceControl = async (topic, value) => {
+    // Optimistic update
+    if (part === 'kd' && Array.isArray(data)) {
+      setData((prev) => 
+        prev.map(d => d.topic === topic ? { ...d, state: value } : d)
+      );
+    }
     try {
       await api('/admin/api/devices/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic, value })
       });
-      loadPart(sel, part);
     } catch (e) {
       alert('ควบคุมอุปกรณ์ล้มเหลว: ' + e.message);
+      loadPart(sel, part);
     }
   };
 
@@ -600,6 +621,19 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
       setData(liveUpdate.data);
     }
   }, [liveUpdate, sel, part]);
+
+  useEffect(() => {
+    const handleDeviceUpdate = (e) => {
+      const { topic, state } = e.detail;
+      if (part === 'kd' && Array.isArray(data)) {
+        setData((prev) => 
+          prev.map(d => d.topic === topic ? { ...d, state: state } : d)
+        );
+      }
+    };
+    window.addEventListener('syn-device-update', handleDeviceUpdate);
+    return () => window.removeEventListener('syn-device-update', handleDeviceUpdate);
+  }, [part, data]);
 
   const ids = Object.keys(users);
 
@@ -1535,6 +1569,8 @@ function App() {
             return { ...prev, [m.user_id]: { ...prev[m.user_id], last_seen: Math.floor(Date.now() / 1000) } };
           });
           setLiveUpdate({ user_id: m.user_id, kind: m.kind, data: m.data, ts: Date.now() });
+        } else if (m.type === 'device_update') {
+          window.dispatchEvent(new CustomEvent('syn-device-update', { detail: { topic: m.topic, state: m.state } }));
         }
       } catch (_) {}
     };

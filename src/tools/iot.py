@@ -13,6 +13,16 @@ import config
 def publish_set(topic: str, value: str) -> str:
     """publish ค่าไปยัง {base}/{topic}/set"""
     full = config.topic(f"{topic}/set")
+    
+    # พยายามใช้ client ที่เชื่อมต่ออยู่แล้วเพื่อส่งทันที (ความเร็วระดับ ~10ms บายพาสการทำ TLS handshake ใหม่)
+    try:
+        import device_state
+        if device_state._client and device_state._client.is_connected():
+            device_state._client.publish(full, value, qos=1)
+            return f"[iot] set {full} = {value} (shared client)"
+    except Exception:
+        pass
+
     tls  = {"tls_version": 2} if config.MQTT_USE_TLS else None
     try:
         publish.single(
@@ -23,7 +33,7 @@ def publish_set(topic: str, value: str) -> str:
             qos=1,
             tls=tls,
         )
-        return f"[iot] set {full} = {value}"
+        return f"[iot] set {full} = {value} (fallback)"
     except Exception as e:
         return f"[iot error] {e}"
 
