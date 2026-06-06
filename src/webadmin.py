@@ -91,6 +91,12 @@ def mount(app, mcp):
         
         uid_safe = store._safe(uid)
         data = store.load_part(uid_safe, kind)
+        if kind == "kd" and isinstance(data, list):
+            import device_state
+            for d in data:
+                st = device_state.get(d.get("topic", ""))
+                if st is not None:
+                    d["state"] = st
         return JSONResponse(data)
 
     # 4. API บันทึกข้อมูลส่วนย่อยของผู้ใช้
@@ -218,6 +224,56 @@ def mount(app, mcp):
             return JSONResponse({"error": f"Failed to save settings: {str(e)}"}, status_code=500)
             
         return JSONResponse({"status": "updated"})
+
+    # API ควบคุมอุปกรณ์ IoT ผ่าน MQTT
+    @route("/admin/api/devices/control", methods=["POST"])
+    async def api_control_device(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        
+        topic = body.get("topic")
+        value = body.get("value")
+        if not topic or value is None:
+            return JSONResponse({"error": "topic and value are required"}, status_code=400)
+            
+        from tools.iot import publish_set
+        res = publish_set(topic, str(value))
+        return JSONResponse({"status": "sent", "result": res})
+
+    # API ดึงข้อมูลอุปกรณ์ทั้งหมดของทุกผู้ใช้ พร้อมสถานะล่าสุด
+    @route("/admin/api/devices", methods=["GET"])
+    async def api_list_all_devices(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        import store
+        import device_state
+        
+        all_devices = []
+        for uid in store.list_users():
+            kd = store.load_part(uid, "kd") or []
+            prof = store.load_part(uid, "profile") or {}
+            user_name = prof.get("displayName") or prof.get("app_name") or uid
+            for d in kd:
+                if d.get("type") == "hub":
+                    continue
+                topic = d.get("topic", "")
+                st = device_state.get(topic)
+                all_devices.append({
+                    "uid": uid,
+                    "userName": user_name,
+                    "topic": topic,
+                    "name": d.get("name", topic),
+                    "room": d.get("room", "ทั่วไป"),
+                    "type": d.get("type", "digital"),
+                    "icon": d.get("icon", "plug"),
+                    "unit": d.get("unit", ""),
+                    "state": st
+                })
+        return JSONResponse(all_devices)
 
     # 9. Real-time WebSockets
     from starlette.websockets import WebSocket, WebSocketDisconnect

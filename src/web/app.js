@@ -35,6 +35,7 @@ const ICONS = {
   refresh: 'M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
   send: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z',
   location: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z',
+  devices: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 9h-8V5h8v6z',
 };
 
 // ── ชิ้นส่วน UI ที่ใช้ซ้ำ ───────────────────────────────────────────────────
@@ -121,6 +122,7 @@ function HubOffline() {
 // ── ส่วนหัว + แท็บ ──────────────────────────────────────────────────────────
 const TABS = [
   { id: 'users', label: 'ผู้ใช้งาน', icon: ICONS.users },
+  { id: 'devices', label: 'อุปกรณ์ IoT', icon: ICONS.devices },
   { id: 'location', label: 'ตำแหน่ง', icon: ICONS.location },
   { id: 'agent', label: 'เอเจนต์', icon: ICONS.agent },
   { id: 'system', label: 'ระบบหลังบ้าน', icon: ICONS.system },
@@ -189,20 +191,257 @@ function ProfileView({ d }) {
 }
 
 const DEV_ICON = { lamp: '💡', bulb: '💡', sparkle: '✨', gauge: '📊', fan: '🌀', ac: '❄️', tv: '📺' };
-function KdView({ d }) {
+
+function DeviceCard({ dev, onControl, disabled }) {
+  const isOnline = dev.state !== null && dev.state !== undefined;
+  let displayValue = '—';
+  let isOn = false;
+
+  if (isOnline) {
+    if (dev.type === 'digital') {
+      const stateLower = String(dev.state).toLowerCase();
+      isOn = stateLower === 'true' || stateLower === 'on' || stateLower === '1';
+      displayValue = isOn ? 'เปิด' : 'ปิด';
+    } else if (dev.type === 'analog') {
+      const valInt = parseInt(dev.state, 10);
+      isOn = valInt > 0;
+      displayValue = `${valInt}/255`;
+    } else if (dev.type === 'sensor') {
+      displayValue = `${dev.state} ${dev.unit || ''}`.trim();
+    }
+  }
+
+  const handleToggle = () => {
+    if (disabled || dev.type === 'sensor') return;
+    const nextVal = isOn ? 'false' : 'true';
+    onControl(dev.topic, nextVal);
+  };
+
+  const handleSliderChange = (e) => {
+    if (disabled) return;
+    const nextVal = e.target.value;
+    onControl(dev.topic, nextVal);
+  };
+
+  return (
+    <div className={`glass-soft rounded-xl2 p-4 flex flex-col justify-between border transition duration-300 ${
+      isOn ? 'border-accent/40 bg-accent/5 shadow-[0_0_12px_rgba(0,212,255,0.06)]' : 'border-line hover:border-lineStrong'
+    }`}>
+      <div className="flex items-start gap-3 w-full">
+        <div className={`w-11 h-11 rounded-xl2 flex items-center justify-center text-xl shrink-0 transition ${
+          isOn ? 'bg-accent/20 text-accent scale-105' : 'bg-white/5 text-inkDim'
+        }`}>
+          {DEV_ICON[dev.icon] || '🔌'}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-sm truncate text-ink" title={dev.name}>{dev.name}</div>
+          <div className="text-xs text-inkDim truncate mt-0.5">{dev.room || '—'}</div>
+          {dev.userName && (
+            <div className="text-[10px] text-inkXdim font-mono truncate mt-0.5">ผู้ใช้: {dev.userName}</div>
+          )}
+          <div className="text-[10px] text-inkXdim font-mono truncate">{dev.topic}</div>
+        </div>
+        <div className="text-right shrink-0">
+          <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full ${
+            dev.type === 'sensor' 
+              ? 'text-accent2 bg-accent2/10' 
+              : isOn 
+                ? 'text-ok bg-ok/10' 
+                : 'text-inkDim bg-white/5'
+          }`}>
+            {displayValue}
+          </span>
+        </div>
+      </div>
+
+      {dev.type !== 'sensor' && (
+        <div className="mt-4 pt-3 border-t border-line/40 flex items-center justify-between gap-4">
+          {dev.type === 'digital' ? (
+            <>
+              <span className="text-[11px] text-inkDim">สั่งการ</span>
+              <button 
+                onClick={handleToggle}
+                disabled={disabled}
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition ${
+                  isOn 
+                    ? 'bg-ok/25 text-ok hover:bg-ok/35 border border-ok/30' 
+                    : 'bg-white/5 text-inkDim hover:bg-white/10 border border-line'
+                }`}
+              >
+                {isOn ? 'ปิด (OFF)' : 'เปิด (ON)'}
+              </button>
+            </>
+          ) : (
+            <div className="w-full flex flex-col gap-1.5">
+              <div className="flex justify-between text-[11px] text-inkDim">
+                <span>ปรับความแรง/แสง</span>
+                <span>{parseInt(dev.state || 0, 10)}</span>
+              </div>
+              <input 
+                type="range" 
+                min="0" 
+                max="255" 
+                value={parseInt(dev.state || 0, 10)} 
+                onChange={handleSliderChange}
+                disabled={disabled}
+                className="w-full accent-accent bg-bg0 h-1.5 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KdView({ d, onControl }) {
   if (!Array.isArray(d) || d.length === 0) return <Spinner text="ไม่มีรายการอุปกรณ์" />;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 fade-in">
       {d.map((dev, i) => (
-        <div key={i} className="glass-soft rounded-xl2 p-4 flex items-center gap-3 hover:border-accent/40 transition">
-          <div className="w-11 h-11 rounded-xl2 bg-accent/10 flex items-center justify-center text-xl shrink-0">{DEV_ICON[dev.icon] || '🔌'}</div>
-          <div className="min-w-0">
-            <div className="font-medium truncate" title={dev.name}>{dev.name}</div>
-            <div className="text-xs text-inkDim truncate">{dev.room || '—'}</div>
-            <div className="mt-1"><Badge color="dim">{dev.type}</Badge></div>
-          </div>
-        </div>
+        <DeviceCard key={i} dev={dev} onControl={onControl} />
       ))}
+    </div>
+  );
+}
+
+function DevicesTab() {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [search, setSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState('all');
+  const [selectedRoom, setSelectedRoom] = useState('all');
+  const [busyTopic, setBusyTopic] = useState(null);
+
+  const fetchDevices = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+    try {
+      const list = await api('/admin/api/devices');
+      setDevices(list);
+      setErr('');
+    } catch (e) {
+      if (e.message !== 'unauthorized') setErr(e.message);
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDevices(true);
+    const interval = setInterval(() => {
+      fetchDevices(false);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [fetchDevices]);
+
+  const handleControl = async (topic, value) => {
+    setBusyTopic(topic);
+    try {
+      await api('/admin/api/devices/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, value })
+      });
+      await fetchDevices(false);
+    } catch (e) {
+      alert('ควบคุมอุปกรณ์ล้มเหลว: ' + e.message);
+    } finally {
+      setBusyTopic(null);
+    }
+  };
+
+  const usersList = ['all', ...new Set(devices.map(d => d.uid))];
+  const userNamesMap = devices.reduce((acc, d) => {
+    acc[d.uid] = d.userName;
+    return acc;
+  }, {});
+
+  const roomsList = ['all', ...new Set(devices.map(d => d.room))];
+
+  const filtered = devices.filter((d) => {
+    const matchesUser = selectedUser === 'all' || d.uid === selectedUser;
+    const matchesRoom = selectedRoom === 'all' || d.room === selectedRoom;
+    const matchesSearch = search.trim() === '' || 
+      d.name.toLowerCase().includes(search.toLowerCase()) || 
+      d.topic.toLowerCase().includes(search.toLowerCase()) ||
+      d.room.toLowerCase().includes(search.toLowerCase());
+    return matchesUser && matchesRoom && matchesSearch;
+  });
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-gradient">ระบบควบคุมอุปกรณ์ในบ้าน</h2>
+          <p className="text-xs text-inkDim mt-0.5">รวมอุปกรณ์ทั้งหมดที่เชื่อมต่อกับระบบเพื่อการควบคุมแบบเรียลไทม์</p>
+        </div>
+        <button onClick={() => fetchDevices(true)} title="โหลดใหม่"
+          className="w-10 h-10 flex items-center justify-center rounded-xl2 text-inkDim hover:text-accent bg-white/5 border border-line hover:border-lineStrong transition">
+          <Icon path={ICONS.refresh} className="w-5 h-5" />
+        </button>
+      </div>
+
+      <Card className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label className="block text-[11px] uppercase tracking-wide text-accent font-semibold mb-1.5">ค้นหาอุปกรณ์</label>
+          <input 
+            type="text" 
+            placeholder="ค้นหาชื่อ, topic หรือห้อง..." 
+            value={search} 
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full text-xs bg-bg1/70 border border-line rounded-xl px-3 py-2 outline-none focus:border-accent transition text-ink"
+          />
+        </div>
+        <div>
+          <label className="block text-[11px] uppercase tracking-wide text-accent font-semibold mb-1.5">กรองตามผู้ใช้งาน</label>
+          <select 
+            value={selectedUser} 
+            onChange={(e) => setSelectedUser(e.target.value)}
+            className="w-full text-xs bg-bg1/70 border border-line rounded-xl px-3 py-2 outline-none focus:border-accent transition text-ink"
+          >
+            <option value="all">ทั้งหมด</option>
+            {usersList.filter(u => u !== 'all').map(uid => (
+              <option key={uid} value={uid}>{userNamesMap[uid] || uid}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] uppercase tracking-wide text-accent font-semibold mb-1.5">กรองตามห้อง</label>
+          <select 
+            value={selectedRoom} 
+            onChange={(e) => setSelectedRoom(e.target.value)}
+            className="w-full text-xs bg-bg1/70 border border-line rounded-xl px-3 py-2 outline-none focus:border-accent transition text-ink"
+          >
+            <option value="all">ทุกห้อง</option>
+            {roomsList.filter(r => r !== 'all').map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </div>
+      </Card>
+
+      {loading ? (
+        <Spinner />
+      ) : err ? (
+        <Spinner text={'โหลดล้มเหลว: ' + err} danger />
+      ) : filtered.length === 0 ? (
+        <Card className="p-10 flex flex-col items-center justify-center text-center text-inkDim min-h-[30vh]">
+          <span className="text-3xl mb-2">🔌</span>
+          <p>ไม่พบอุปกรณ์ที่ตรงกับตัวกรอง</p>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 fade-in">
+          {filtered.map((dev, i) => (
+            <DeviceCard 
+              key={i} 
+              dev={dev} 
+              onControl={handleControl} 
+              disabled={busyTopic === dev.topic} 
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -284,10 +523,10 @@ function PhoneView({ d }) {
 const PART_LABELS = { profile: 'ข้อมูลส่วนตัว', kd: 'อุปกรณ์ (KD)', scenes: 'Scenes', routines: 'Routines', phone: 'มือถือ' };
 const PART_KEYS = ['profile', 'kd', 'scenes', 'routines', 'phone'];
 
-function PartView({ part, data }) {
+function PartView({ part, data, onDeviceControl }) {
   if (data === null || data === undefined) return <Spinner text="ไม่มีข้อมูลสำหรับส่วนนี้" />;
   if (part === 'profile') return <ProfileView d={data} />;
-  if (part === 'kd') return <KdView d={data} />;
+  if (part === 'kd') return <KdView d={data} onControl={onDeviceControl} />;
   if (part === 'scenes') return <ScenesView d={data} />;
   if (part === 'routines') return <RoutinesView d={data} />;
   if (part === 'phone') return <PhoneView d={data} />;
@@ -301,6 +540,19 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
   const [data, setData] = useState(undefined);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+
+  const handleDeviceControl = async (topic, value) => {
+    try {
+      await api('/admin/api/devices/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, value })
+      });
+      loadPart(sel, part);
+    } catch (e) {
+      alert('ควบคุมอุปกรณ์ล้มเหลว: ' + e.message);
+    }
+  };
 
   const deleteUser = async (uid) => {
     if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบผู้ใช้ ${uid}?\nข้อมูลทั้งหมด (Profile, อุปกรณ์, Scenes, Routines) จะถูกลบออกอย่างถาวร`)) {
@@ -388,7 +640,7 @@ function UsersTab({ users, reloadUsers, liveUpdate }) {
               </button>
             ))}
           </div>
-          {loading ? <Spinner /> : err ? <Spinner text={'โหลดล้มเหลว: ' + err} danger /> : <PartView part={part} data={data} />}
+          {loading ? <Spinner /> : err ? <Spinner text={'โหลดล้มเหลว: ' + err} danger /> : <PartView part={part} data={data} onDeviceControl={handleDeviceControl} />}
         </Card>
       )}
     </div>
@@ -1289,6 +1541,9 @@ function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5">
         <div style={{ display: tab === 'users' ? '' : 'none' }}>
           <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />
+        </div>
+        <div style={{ display: tab === 'devices' ? '' : 'none' }}>
+          <DevicesTab />
         </div>
         <div style={{ display: tab === 'location' ? '' : 'none' }}>
           <LocationTab users={users} liveUpdate={liveUpdate} activeTab={tab} />

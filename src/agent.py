@@ -44,8 +44,11 @@ Hub นี้ดูแลผู้ใช้ได้หลายคนค่ะ 
 - find_user(ชื่อ) → ค้นหาข้อมูลส่วนตัวของคนนั้น (สำหรับตอบคำถามเช่น "ใครคือ..." หรือ "ช่วยเล่าข้อมูลเกี่ยวกับ...")
 - read_user_data(ชื่อ, kind) → อ่านข้อมูลอุปกรณ์ (kd), ฉาก (scenes), กฎอัตโนมัติ (routines), มือถือ (phone) หรือโปรไฟล์ (profile) ของผู้ใช้
 - send_command_to_user_app(ชื่อ, ข้อความ, ประเภท) → ส่งข้อความคุยแชทหรือสั่งงานไปยังแอปมือถือของผู้ใช้โดยตรง
+- set_device(topic, value) → สั่งเปลี่ยนค่า/สถานะอุปกรณ์ IoT ผ่าน MQTT (เช่น เปิด/ปิดไฟ, ปรับพัดลม)
+- get_device_state(topic) → อ่านสถานะล่าสุดของอุปกรณ์ IoT จากระบบแคช
 👉 ให้ดูเจตนาจากคำสั่งว่าหมายถึงผู้ใช้คนไหน แล้วเรียกใช้เครื่องมือกับคนนั้นให้ถูกต้องนะคะ หากกำกวมหรือไม่แน่ใจ ให้ถามกลับสั้นๆ เพื่อความชัดเจนค่ะ
 👉 หากคำสั่งอ้างถึงผู้ใช้ที่กำลังโฟกัสอยู่ (Active User) สามารถปล่อยชื่อว่างไว้ได้เลยค่ะ เครื่องมือจะจัดการเลือกคนปัจจุบันให้อัตโนมัติ
+👉 สำคัญ: ก่อนสั่งงานหรือเช็คสถานะอุปกรณ์ IoT ของผู้ใช้คนใดก็ตาม ให้ใช้ `read_user_data(ชื่อ, 'kd')` เพื่อสืบค้นรายการอุปกรณ์ทั้งหมดและดูว่าแต่ละตัวใช้ `topic` อะไร จากนั้นค่อยเรียกใช้ `set_device` หรือ `get_device_state` ด้วย `topic` นั้นค่ะ
 
 [กฎการสื่อสารแบบ Agent-to-Agent (การสื่อสารระหว่างคุณกับผู้ช่วยมือถือ)]
 การส่งข้อความ/คำสั่งผ่าน `send_command_to_user_app` คือการที่ "คุณ (Central Hub Agent)" สื่อสารประสานงานกับ "เอเจนต์ผู้ช่วยส่วนตัว (เช่น ซิน)" ที่ดูแลผู้ใช้คนนั้นอยู่ ไม่ใช่การคุยตรงกับผู้ใช้!
@@ -219,8 +222,27 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         res = account.send_app_command(uid, command, command_type, sender=config.AGENT_NAME)
         return f"ผู้ใช้ '{display_name}' (id: {uid}): {res}"
 
+    @tool
+    def set_device(topic: str, value: str) -> str:
+        """ควบคุมหรือสั่งเปลี่ยนค่าอุปกรณ์ IoT ในบ้านผ่าน MQTT
+        - topic: topic ของอุปกรณ์ (เช่น 'bedroom/lamp')
+        - value: ค่าที่ต้องการสั่งงาน (เช่น 'true' เพื่อเปิด, 'false' เพื่อปิด หรือ 'toggle' สำหรับอุปกรณ์ประเภท digital, หรือค่าตัวเลข 0-255 สำหรับอุปกรณ์ประเภท analog)
+        """
+        from tools.iot import publish_set
+        return publish_set(topic, value)
+
+    @tool
+    def get_device_state(topic: str) -> str:
+        """อ่านสถานะล่าสุดที่บันทึกไว้ของอุปกรณ์ IoT ในบ้านตาม topic ของอุปกรณ์นั้น (เช่น 'bedroom/lamp')"""
+        import device_state
+        val = device_state.get(topic)
+        if val is None:
+            return f"ไม่พบสถานะของอุปกรณ์ที่ topic: {topic} (อาจจะยังไม่มีการส่งข้อมูลมา)"
+        return f"สถานะปัจจุบันของอุปกรณ์ {topic} คือ: {val}"
+
     return [os_exec, web_search, query_system,
-            list_users, find_user, read_user_data, send_command_to_user_app]
+            list_users, find_user, read_user_data, send_command_to_user_app,
+            set_device, get_device_state]
 
 
 def run(
