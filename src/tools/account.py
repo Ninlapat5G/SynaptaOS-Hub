@@ -63,7 +63,8 @@ def find_user_by_query(user_query: str) -> str | None:
     return best_match
 
 
-def send_app_command(user_id: str, command: str, command_type: str, sender: str | None = None) -> str:
+def send_app_command(user_id: str, command: str, command_type: str, sender: str | None = None,
+                     wait: bool = True) -> str:
     """ส่งคำสั่ง/ข้อความไปแอปมือถือผ่าน **FCM อย่างเดียว** (ช่องเดียวพอ)
 
     ทำไมไม่ใช้ MQTT: Hub→App ถ้าจะส่งถึงต้องให้แอปออนไลน์ MQTT ซึ่ง = แอปเปิดอยู่
@@ -77,17 +78,35 @@ def send_app_command(user_id: str, command: str, command_type: str, sender: str 
     if sender is None:
         sender = config.AGENT_NAME
 
+    import hub_response
+
     corr_id = f"hub-cmd-{int(time.time())}-{str(uuid.uuid4())[:8]}"
-    title = "ซินมีข้อความถึงคุณ" if command_type == "chat" else "Hub ฝากงานให้ทำ"
+    prof = store.load_part(user_id, "profile") or {}
+    assistant = prof.get("assistantName") or "ซิน"   # ใช้ชื่อผู้ช่วยจริงของคนรับ (ไม่ fix เป็น "ซิน")
+    title = f"{assistant}มีข้อความถึงคุณ" if command_type == "chat" else "Hub ฝากงานให้ทำ"
     body = command if len(command) <= 120 else command[:117] + "..."
+
+    # ลงทะเบียนรอผลก่อนส่ง (กันผลกลับมาเร็วกว่าจะได้ลงทะเบียน)
+    if wait:
+        hub_response.arm(corr_id, user_id)
     sent = fcm_push.send(user_id, title, body, {
         "corr_id": corr_id,
         "sender": sender,
         "type": command_type,
         ("text" if command_type == "chat" else "action_prompt"): command,
     })
-    if sent:
-        _log.info("ส่ง FCM (%s) ให้ %s: %s", command_type, user_id, command[:80])
+    if not sent:
+        _log.warning("ส่ง FCM ให้ %s ไม่สำเร็จ (ไม่มี fcmToken/FCM ปิด)", user_id)
+        return f"ส่งไม่สำเร็จ — แอปนี้ยังไม่มี fcmToken หรือ FCM ปิดอยู่ (corr_id: {corr_id})"
+
+    _log.info("ส่ง FCM (%s) ให้ %s: %s", command_type, user_id, command[:80])
+    if not wait:   # เช่น automation รายงานผลกลับ — ส่งแล้วจบ ไม่ต้องรอผลตอบ
         return f"ส่งให้แอปผ่าน FCM แล้ว (corr_id: {corr_id})"
-    _log.warning("ส่ง FCM ให้ %s ไม่สำเร็จ (ไม่มี fcmToken/FCM ปิด)", user_id)
-    return f"ส่งไม่สำเร็จ — แอปนี้ยังไม่มี fcmToken หรือ FCM ปิดอยู่ (corr_id: {corr_id})"
+    # รอผลกลับจากแอป (App publish hub_response ตอนทำเสร็จ — เฉพาะตอนแอปเปิดอยู่)
+    # action ใช้เวลานานกว่า (แอปต้องรัน agent) → รอนานกว่า chat
+    timeout = 45 if command_type == "action" else 15
+    res = hub_response.collect(corr_id, timeout)
+    if res is None:
+        return f"ส่งให้แอปแล้ว แต่ปลายทางยังไม่ตอบกลับ (อาจพับแอปอยู่ จะทำให้ตอนเปิดแอป) — corr_id: {corr_id}"
+    head = "ปลายทางทำให้แล้ว" if res["ok"] else "ปลายทางทำไม่สำเร็จ"
+    return f"{head}: {res['detail']}"

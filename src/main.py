@@ -12,8 +12,9 @@ import log
 import discovery
 import telemetry
 import device_state
+import hub_response
 import server
-from tools import system_info
+from tools import system_info, automation
 
 _log = logging.getLogger("hub")
 
@@ -45,8 +46,20 @@ def main():
         _log.error("devstate start ล้มเหลว (live device state ปิด): %s", e)
 
     try:
+        hub_response.start()
+    except Exception as e:
+        _log.error("hub_response start ล้มเหลว (รับผลกลับจากแอปปิด): %s", e)
+
+    try:
+        automation.start()
+    except Exception as e:
+        _log.error("automation start ล้มเหลว (งานอัตโนมัติ Hub ปิด): %s", e)
+
+    try:
         server.run()
     finally:
+        automation.stop()
+        hub_response.stop()
         device_state.stop()
         telemetry.stop()
         discovery.stop()
