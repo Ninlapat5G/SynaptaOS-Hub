@@ -3,6 +3,14 @@
 
 const { useState, useEffect, useRef, useCallback } = React;
 
+const MotionObj = window.Motion || window.FramerMotion || window.framerMotion;
+const motion = MotionObj ? MotionObj.motion : {
+  div: 'div', button: 'button', span: 'span', p: 'p', ul: 'ul', li: 'li',
+  h2: 'h2', h3: 'h3', form: 'form', textarea: 'textarea', input: 'input'
+};
+const AnimatePresence = MotionObj ? MotionObj.AnimatePresence : React.Fragment;
+
+
 // ── token + ตัวช่วยเรียก API ───────────────────────────────────────────────
 let TOKEN = localStorage.getItem('admin_token') || '';
 
@@ -224,9 +232,15 @@ function DeviceCard({ dev, onControl, disabled }) {
   };
 
   return (
-    <div className={`glass-soft rounded-xl2 p-4 flex flex-col justify-between border transition duration-300 ${
-      isOn ? 'border-accent/40 bg-accent/5 shadow-[0_0_12px_rgba(0,212,255,0.06)]' : 'border-line hover:border-lineStrong'
-    }`}>
+    <motion.div 
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      whileHover={{ y: -4 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+      className={`glass-soft rounded-xl2 p-4 flex flex-col justify-between border transition-colors duration-300 ${
+        isOn ? 'border-accent/40 bg-accent/5 shadow-[0_0_12px_rgba(0,212,255,0.06)]' : 'border-line hover:border-lineStrong'
+      }`}
+    >
       <div className="flex items-start gap-3 w-full">
         <div className={`w-11 h-11 rounded-xl2 flex items-center justify-center text-xl shrink-0 transition ${
           isOn ? 'bg-accent/20 text-accent scale-105' : 'bg-white/5 text-inkDim'
@@ -290,7 +304,7 @@ function DeviceCard({ dev, onControl, disabled }) {
           )}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -849,14 +863,31 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
   };
 
   const bubble = (m, i) => {
-    if (m.role === 'sys') return <div key={i} className="mx-auto text-center text-xs text-inkDim bg-white/5 rounded-xl2 px-4 py-2 max-w-lg">{m.text}</div>;
+    if (m.role === 'sys') {
+      return (
+        <motion.div 
+          key={i} 
+          initial={{ opacity: 0, y: 5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-auto text-center text-xs text-inkDim bg-white/5 rounded-xl2 px-4 py-2 max-w-lg"
+        >
+          {m.text}
+        </motion.div>
+      );
+    }
     const me = m.role === 'user';
     return (
-      <div key={i} className={'max-w-[85%] sm:max-w-[75%] px-4 py-2.5 rounded-xl2 text-sm whitespace-pre-wrap break-words '
-        + (me ? 'self-end text-bg0 font-medium' : 'self-start glass-soft')}
-        style={me ? { background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' } : {}}>
+      <motion.div 
+        key={i} 
+        initial={{ opacity: 0, scale: 0.96, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
+        className={'max-w-[85%] sm:max-w-[75%] px-4 py-2.5 rounded-xl2 text-sm whitespace-pre-wrap break-words '
+          + (me ? 'self-end text-bg0 font-medium' : 'self-start glass-soft')}
+        style={me ? { background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' } : {}}
+      >
         {m.text}
-      </div>
+      </motion.div>
     );
   };
 
@@ -894,12 +925,26 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
             </div>
           ) : msgs.map(bubble)}
           {busy && !msgs.some(m => m.role === 'agent' && m.streaming) && (
-            <div className="self-start glass-soft rounded-xl2 px-4 py-3 flex items-center gap-1.5 text-sm text-inkDim">
-              <span className="think-dot w-2 h-2 rounded-full bg-accent" />
-              <span className="think-dot w-2 h-2 rounded-full bg-accent" />
-              <span className="think-dot w-2 h-2 rounded-full bg-accent" />
-              <span className="ml-2">เอเจนต์กำลังเริ่มวางแผนงาน...</span>
-            </div>
+            <motion.div 
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="self-start glass-soft rounded-xl2 px-4 py-3 flex items-center gap-1.5 text-sm text-inkDim"
+            >
+              {[0, 1, 2].map((idx) => (
+                <motion.span 
+                  key={idx}
+                  animate={{ y: [0, -4, 0] }}
+                  transition={{
+                    duration: 0.6,
+                    repeat: Infinity,
+                    delay: idx * 0.15,
+                    ease: "easeInOut"
+                  }}
+                  className="w-2 h-2 rounded-full bg-accent inline-block" 
+                />
+              ))}
+              <span className="ml-2">เอเจนต์กำลังคิดและวางแผนงาน...</span>
+            </motion.div>
           )}
         </div>
 
@@ -1538,24 +1583,36 @@ function App() {
     <div className="min-h-screen">
       <Header tab={tab} setTab={setTab} online={online} hasToken={!!TOKEN} onLogout={logout} />
       {/* คงทุกแท็บไว้ (ซ่อน/โชว์ด้วย display) — สลับแท็บแล้วข้อมูลแต่ละหน้าไม่หาย ไม่ต้องโหลดใหม่ */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 overflow-hidden">
         <div style={{ display: tab === 'users' ? '' : 'none' }}>
-          <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />
+          <motion.div animate={tab === 'users' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />
+          </motion.div>
         </div>
         <div style={{ display: tab === 'devices' ? '' : 'none' }}>
-          <DevicesTab />
+          <motion.div animate={tab === 'devices' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <DevicesTab />
+          </motion.div>
         </div>
         <div style={{ display: tab === 'location' ? '' : 'none' }}>
-          <LocationTab users={users} liveUpdate={liveUpdate} activeTab={tab} />
+          <motion.div animate={tab === 'location' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <LocationTab users={users} liveUpdate={liveUpdate} activeTab={tab} />
+          </motion.div>
         </div>
         <div style={{ display: tab === 'agent' ? '' : 'none' }}>
-          <AgentTab users={users} msgs={agentMsgs} setMsgs={setAgentMsgs} ctxUser={agentCtxUser} setCtxUser={setAgentCtxUser} />
+          <motion.div animate={tab === 'agent' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <AgentTab users={users} msgs={agentMsgs} setMsgs={setAgentMsgs} ctxUser={agentCtxUser} setCtxUser={setAgentCtxUser} />
+          </motion.div>
         </div>
         <div style={{ display: tab === 'system' ? '' : 'none' }}>
-          <SystemTab />
+          <motion.div animate={tab === 'system' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <SystemTab />
+          </motion.div>
         </div>
         <div style={{ display: tab === 'settings' ? '' : 'none' }}>
-          <SettingsTab onTokenSaved={reloadUsers} />
+          <motion.div animate={tab === 'settings' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <SettingsTab onTokenSaved={reloadUsers} />
+          </motion.div>
         </div>
       </main>
       {hubDown && <HubOffline />}
