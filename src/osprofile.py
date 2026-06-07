@@ -12,7 +12,7 @@ _PROFILES = {
         "disk": "wmic logicaldisk get size,freespace",
         "shutdown": "shutdown /s /t 0",
         "examples": '''- "เปิด YouTube" → os_exec("start https://youtube.com")
-- "เปิดเพลง X" → web_search("X YouTube") → เอา URL ที่ได้ → os_exec("start <url>")
+- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → os_exec("start <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
 - "ดู disk ที่เหลือ" → os_exec("wmic logicaldisk get size,freespace")
 - "shutdown" → os_exec("shutdown /s /t 0")
 - "pause/เล่นเพลง" → os_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]179)"')
@@ -23,7 +23,7 @@ _PROFILES = {
         "disk": "df -h",
         "shutdown": "shutdown -h now",
         "examples": '''- "เปิด YouTube" → os_exec("xdg-open https://youtube.com")
-- "เปิดเพลง X" → web_search("X YouTube") → เอา URL ที่ได้ → os_exec("xdg-open <url>")
+- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → os_exec("xdg-open <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
 - "ดู disk ที่เหลือ" → os_exec("df -h")
 - "shutdown" → os_exec("shutdown -h now")   # บางเครื่องต้อง sudo
 - "pause/เล่นเพลง" → os_exec("playerctl play-pause")
@@ -34,7 +34,7 @@ _PROFILES = {
         "disk": "df -h",
         "shutdown": "shutdown -h now",
         "examples": '''- "เปิด YouTube" → os_exec("open https://youtube.com")
-- "เปิดเพลง X" → web_search("X YouTube") → เอา URL ที่ได้ → os_exec("open <url>")
+- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → os_exec("open <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
 - "ดู disk ที่เหลือ" → os_exec("df -h")
 - "shutdown" → os_exec("sudo shutdown -h now")
 - "pause/เล่นเพลง" → os_exec("osascript -e 'tell application \\"Music\\" to playpause'")
