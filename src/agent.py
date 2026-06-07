@@ -24,6 +24,18 @@ import session
 from pathlib import Path
 
 _log = logging.getLogger("agent")
+_tool_log = logging.getLogger("tool_select")  # log การเลือก tool ของ ReAct loop (วัดเลือกถูก/ผิด + เตรียม tool-scoping)
+
+
+def tool_group(name: str) -> str:
+    """กลุ่มของ tool = prefix ก่อน '_' (system/web/user/iot)
+
+    convention: ตั้งชื่อ tool เป็น <group>_<action> เสมอ (เช่น iot_set, user_find, system_exec)
+    → จัดกลุ่ม/สโคป tool หรือทำ router ทีหลังได้ด้วยการกรอง prefix (ไม่ต้องมี registry แยก)
+    """
+    return name.split("_", 1)[0]
+
+
 from tools import os_exec as _os_exec
 from tools import web_search as _web_search
 from tools import system_info
@@ -42,22 +54,22 @@ _SYSTEM = """\
 
 [การทำงานร่วมกับผู้ใช้หลายคน]
 Hub นี้ดูแลผู้ใช้ได้หลายคนค่ะ โดยแต่ละคนจะมีข้อมูล อุปกรณ์ และหน้าแอปมือถือของตัวเอง เครื่องมือที่คุณสามารถใช้จัดการได้แก่:
-- list_users → เพื่อดูรายชื่อและ ID ของผู้ใช้ทั้งหมดในระบบ
-- find_user(ชื่อ) → ค้นหาข้อมูลส่วนตัวของคนนั้น (สำหรับตอบคำถามเช่น "ใครคือ..." หรือ "ช่วยเล่าข้อมูลเกี่ยวกับ...")
-- read_user_data(ชื่อ, kind) → อ่านข้อมูลอุปกรณ์ (kd), ฉาก (scenes), กฎอัตโนมัติ (routines), มือถือ (phone) หรือโปรไฟล์ (profile) ของผู้ใช้
-- send_command_to_user_app(ชื่อ, ข้อความ, ประเภท) → ส่งข้อความคุยแชทหรือสั่งงานไปยังแอปมือถือของผู้ใช้โดยตรง
-- set_device(topic, value) → สั่งเปลี่ยนค่า/สถานะอุปกรณ์ IoT ผ่าน MQTT (เช่น เปิด/ปิดไฟ, ปรับพัดลม)
-- get_device_state(topic) → อ่านสถานะล่าสุดของอุปกรณ์ IoT จากระบบแคช
+- user_list → เพื่อดูรายชื่อและ ID ของผู้ใช้ทั้งหมดในระบบ
+- user_find(ชื่อ) → ค้นหาข้อมูลส่วนตัวของคนนั้น (สำหรับตอบคำถามเช่น "ใครคือ..." หรือ "ช่วยเล่าข้อมูลเกี่ยวกับ...")
+- user_read_data(ชื่อ, kind) → อ่านข้อมูลอุปกรณ์ (kd), ฉาก (scenes), กฎอัตโนมัติ (routines), มือถือ (phone) หรือโปรไฟล์ (profile) ของผู้ใช้
+- user_send_command(ชื่อ, ข้อความ, ประเภท) → ส่งข้อความคุยแชทหรือสั่งงานไปยังแอปมือถือของผู้ใช้โดยตรง
+- iot_set(topic, value) → สั่งเปลี่ยนค่า/สถานะอุปกรณ์ IoT ผ่าน MQTT (เช่น เปิด/ปิดไฟ, ปรับพัดลม)
+- iot_get_state(topic) → อ่านสถานะล่าสุดของอุปกรณ์ IoT จากระบบแคช
 👉 ให้ดูเจตนาจากคำสั่งว่าหมายถึงผู้ใช้คนไหน แล้วเรียกใช้เครื่องมือกับคนนั้นให้ถูกต้องนะคะ หากกำกวมหรือไม่แน่ใจ ให้ถามกลับสั้นๆ เพื่อความชัดเจนค่ะ
 👉 หากคำสั่งอ้างถึงผู้ใช้ที่กำลังโฟกัสอยู่ (Active User) สามารถปล่อยชื่อว่างไว้ได้เลยค่ะ เครื่องมือจะจัดการเลือกคนปัจจุบันให้อัตโนมัติ
-👉 สำคัญ: ก่อนสั่งงานหรือเช็คสถานะอุปกรณ์ IoT ของผู้ใช้คนใดก็ตาม ให้ใช้ `read_user_data(ชื่อ, 'kd')` เพื่อสืบค้นรายการอุปกรณ์ทั้งหมดและดูว่าแต่ละตัวใช้ `topic` อะไร จากนั้นค่อยเรียกใช้ `set_device` หรือ `get_device_state` ด้วย `topic` นั้นค่ะ
+👉 สำคัญ: ก่อนสั่งงานหรือเช็คสถานะอุปกรณ์ IoT ของผู้ใช้คนใดก็ตาม ให้ใช้ `user_read_data(ชื่อ, 'kd')` เพื่อสืบค้นรายการอุปกรณ์ทั้งหมดและดูว่าแต่ละตัวใช้ `topic` อะไร จากนั้นค่อยเรียกใช้ `iot_set` หรือ `iot_get_state` ด้วย `topic` นั้นค่ะ
 
 [สำคัญมาก — "เครื่อง Hub นี้" ≠ "เครื่อง/มือถือของผู้ใช้" เลือกเครื่องมือให้ถูก!]
-- `os_exec` รันได้แค่บน "เครื่อง Hub นี้เอง" (เซิร์ฟเวอร์กลาง) เท่านั้น — ใช้กับงานของระบบ/เซิร์ฟเวอร์บนเครื่องนี้ เช่น รัน script, ดูพื้นที่ดิสก์, งานเบื้องหลัง
-- ถ้าคำสั่งให้ไป "ทำบนเครื่องหรือมือถือของผู้ใช้คนใดคนหนึ่ง" (เช่น "เปิด ... ในเครื่องนิน", "เปิดแอป ... บนมือถือจิม", "เปิด ... ให้พ่อ") → ❌ ห้ามใช้ `os_exec` เด็ดขาด เพราะนั่นคืออุปกรณ์ของเขา ไม่ใช่เครื่อง Hub นี้ ✅ ให้ใช้ `send_command_to_user_app(ชื่อ, คำสั่ง, 'action')` ส่งให้แอปผู้ช่วยของคนนั้นไปลงมือทำบนอุปกรณ์ของเขาเอง (ยิงผ่าน FCM) แล้วรอผลกลับมารายงาน
+- `system_exec` รันได้แค่บน "เครื่อง Hub นี้เอง" (เซิร์ฟเวอร์กลาง) เท่านั้น — ใช้กับงานของระบบ/เซิร์ฟเวอร์บนเครื่องนี้ เช่น รัน script, ดูพื้นที่ดิสก์, งานเบื้องหลัง
+- ถ้าคำสั่งให้ไป "ทำบนเครื่องหรือมือถือของผู้ใช้คนใดคนหนึ่ง" (เช่น "เปิด ... ในเครื่องนิน", "เปิดแอป ... บนมือถือจิม", "เปิด ... ให้พ่อ") → ❌ ห้ามใช้ `system_exec` เด็ดขาด เพราะนั่นคืออุปกรณ์ของเขา ไม่ใช่เครื่อง Hub นี้ ✅ ให้ใช้ `user_send_command(ชื่อ, คำสั่ง, 'action')` ส่งให้แอปผู้ช่วยของคนนั้นไปลงมือทำบนอุปกรณ์ของเขาเอง (ยิงผ่าน FCM) แล้วรอผลกลับมารายงาน
 
 [กฎการสื่อสารแบบ Agent-to-Agent (การสื่อสารระหว่างคุณกับผู้ช่วยมือถือ)]
-การส่งข้อความ/คำสั่งผ่าน `send_command_to_user_app` คือการที่ "คุณ (Central Hub Agent)" สื่อสารประสานงานกับ "เอเจนต์ผู้ช่วยส่วนตัว (เช่น ซิน)" ที่ดูแลผู้ใช้คนนั้นอยู่ ไม่ใช่การคุยตรงกับผู้ใช้!
+การส่งข้อความ/คำสั่งผ่าน `user_send_command` คือการที่ "คุณ (Central Hub Agent)" สื่อสารประสานงานกับ "เอเจนต์ผู้ช่วยส่วนตัว (เช่น ซิน)" ที่ดูแลผู้ใช้คนนั้นอยู่ ไม่ใช่การคุยตรงกับผู้ใช้!
 ดังนั้น:
 1. ให้ส่งข้อความในลักษณะของ "เอเจนต์คุยกับเอเจนต์" เพื่อฝากเรื่อง หรือบอกให้ผู้ช่วยคนนั้นไปแจ้งเตือน/ดูแลผู้ใช้ต่อ
    - ตัวอย่างที่ดี (ประสานงานฝากบอกผู้ช่วย): "ซิน ฝากเตือนคุณนินด้วยนะว่ากาน้ำร้อนบนเตาต้มเดือดแล้ว" หรือ "ซิน รบกวนช่วยเปิดพัดลมในห้องนั่งเล่นให้คุณนินด้วยนะ"
@@ -73,7 +85,7 @@ Hub นี้ดูแลผู้ใช้ได้หลายคนค่ะ 
   (2) ตอบเรื่องข้อมูลปัจจุบัน/ไม่แน่ใจ — ข่าว, อากาศ, ราคา, เหตุการณ์, ผลล่าสุด ฯลฯ
   (3) หาวิธี/ที่อยู่ไฟล์/ชื่อโปรแกรม/คำสั่งที่ไม่มั่นใจ
   👉 ได้ "ข้อมูลจริง" จาก search แล้วค่อยลงมือ — ❌ ห้ามเดา/แต่ง/มั่ว URL หรือคำตอบขึ้นมาเองเด็ดขาด
-- เมื่อค้นหาข้อมูลจนเจอผลลัพธ์แล้ว (เช่น ลิงก์หรือโปรแกรม) ต้องสั่งเปิดใช้งานต่อด้วยเครื่องมือ os_exec ทันทีนะคะ ห้ามแค่ส่ง URL กลับมาเฉยๆ ค่ะ
+- เมื่อค้นหาข้อมูลจนเจอผลลัพธ์แล้ว (เช่น ลิงก์หรือโปรแกรม) ต้องสั่งเปิดใช้งานต่อด้วยเครื่องมือ system_exec ทันทีนะคะ ห้ามแค่ส่ง URL กลับมาเฉยๆ ค่ะ
 - ❓ ถ้าคำสั่งกำกวมหรือขาดข้อมูลสำคัญ (ไม่รู้ว่าเพลง/แอป/ลิงก์/อุปกรณ์/คนไหนกันแน่) → "อย่าเดา" ให้ถามกลับสั้น ๆ 1 คำถามเพื่อยืนยันก่อนลงมือจริง — คำถามที่ตอบกลับไปจะถูกส่งถึงต้นทางเอง (มาจากแอป=เด้งถามเจ้าของผ่านแอป, มาจาก web admin=โชว์ให้ผู้ดูแลตอบ) แล้วรอคำตอบค่อยทำจริง ดีกว่าทำผิด/เปิดผิดลิงก์
 - เมื่อทำงานสำเร็จแล้ว ให้รายงานผลสรุปสั้นๆ เพียง 1 บรรทัดด้วยภาษาที่สุภาพ เป็นกันเอง น่ารัก และใส่อีโมจิที่เข้ากับเรื่องด้วยนะคะ ⚠️ ห้ามรายงานผลเป็น Markdown หรือส่งโค้ดแบบ Code block เด็ดขาดค่ะ
 - เลือกใช้คำสั่ง Terminal ให้ตรงกับระบบ {os_type} ของเครื่องเสมอ
@@ -123,7 +135,7 @@ def _context(user_id: str | None) -> str:
         return (
             "[ผู้ใช้ที่กำลังโฟกัสตอนนี้ — ถ้าคำสั่งพูดลอย ๆ ไม่ระบุชื่อ ให้หมายถึงคนนี้เสมอ]\n"
             + "\n".join(lines)
-            + "\n(จะอ้างถึงคนอื่นก็ได้ — ใช้ find_user/read_user_data ค้นชื่อคนนั้น)"
+            + "\n(จะอ้างถึงคนอื่นก็ได้ — ใช้ user_find/user_read_data ค้นชื่อคนนั้น)"
         )
 
     # โหมดอัตโนมัติ — ไม่ได้เจาะจงคน: โชว์รายชื่อทั้งหมดให้ agent เลือกเอง
@@ -141,25 +153,25 @@ def _context(user_id: str | None) -> str:
     return (
         "[ผู้ใช้ในระบบ — มีได้หลายคน ดูให้ดีว่าคำสั่งหมายถึงใคร]\n"
         + "\n".join(roster)
-        + "\n→ เลือกคนให้ถูกจากคำสั่ง แล้วใช้ find_user / read_user_data / send_command_to_user_app กับคนนั้น"
+        + "\n→ เลือกคนให้ถูกจากคำสั่ง แล้วใช้ user_find / user_read_data / user_send_command กับคนนั้น"
         + "\n→ ถ้าเป็นงานบนเครื่องนี้เองที่ไม่เกี่ยวกับใครเป็นพิเศษ ก็ทำได้เลย ไม่ต้องเลือกคน"
     )
 
 
 def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user_id: str | None,
                 allow_power: bool = False):
-    @tool
+    @tool("system_exec")
     def os_exec(command: str) -> str:
         """Execute a terminal command on this computer. Supports cd — directory persists across calls within this task."""
         return _os_exec.run(command, timeout=timeout, kill_event=kill_event, cwd_box=cwd_box,
                             allow_power=allow_power)
 
-    @tool
+    @tool("web_search")
     def web_search(query: str) -> str:
         """Search the web for information needed to complete the task."""
         return _web_search.search(query)
 
-    @tool
+    @tool("system_status")
     def query_system() -> str:
         """Get current machine state: OS, disk and memory usage."""
         return system_info.snapshot_text()
@@ -175,7 +187,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
             return user_id
         return account.find_user_by_query(q)
 
-    @tool
+    @tool("user_list")
     def list_users() -> str:
         """รายชื่อผู้ใช้ทั้งหมดที่จับคู่กับ Hub นี้ (ชื่อ + id) — ดูก่อนเพื่อเลือกทำงานให้ถูกคน"""
         reg = store.list_users()
@@ -188,7 +200,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
             out.append(f"- {name} (id: {uid})")
         return "\n".join(out)
 
-    @tool
+    @tool("user_find")
     def find_user(user_query: str) -> str:
         """ค้นหาผู้ใช้จากชื่อจริง/ชื่อเล่น/ไบโอ แล้วคืนข้อมูลตัวตน (ชื่อ, เกี่ยวกับเขา, สิ่งที่ชอบ)
         ใช้ตอบ "ใครคือ..." หรือก่อนจะทำงาน/คุยกับใครสักคน · เว้น user_query ว่าง = คนที่กำลังโฟกัสอยู่"""
@@ -201,7 +213,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         mem = prof.get("userMemory") or "-"
         return f"{name} (id: {uid})\nเกี่ยวกับเขา: {bio}\nสิ่งที่รู้เพิ่มเติม: {mem}"
 
-    @tool
+    @tool("user_remember")
     def remember(user_query: str, note: str) -> str:
         """จำสิ่งสำคัญเกี่ยวกับผู้ใช้ไว้ใช้ครั้งหน้า เช่นสิ่งที่เขาชอบ ข้อควรระวัง หรือบทเรียนจากงานที่เพิ่งทำ
         เก็บแยกของแต่ละคน · user_query = ชื่อผู้ใช้ (เว้นว่าง = คนที่กำลังโฟกัสอยู่)"""
@@ -220,7 +232,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         store.save_part(uid, "profile", {"hubMemory": "\n".join(lines[-30:])})  # เก็บล่าสุด ~30 บรรทัด กันบวม
         return "จำไว้ให้แล้วค่ะ ✨"
 
-    @tool
+    @tool("user_read_data")
     def read_user_data(user_query: str, kind: str) -> str:
         """อ่านข้อมูลของผู้ใช้คนหนึ่ง: kind = kd (อุปกรณ์ในบ้าน) | scenes | routines | phone | profile
         user_query = ชื่อของผู้ใช้ (จะค้นให้) · เว้นว่าง = คนที่กำลังโฟกัสอยู่"""
@@ -246,7 +258,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
             return json.dumps(slim, ensure_ascii=False)
         return json.dumps(data, ensure_ascii=False) if data is not None else f"(ไม่มีข้อมูล {kind} ของคนนี้)"
 
-    @tool
+    @tool("user_send_command")
     def send_command_to_user_app(user_query: str, command: str,
                                  command_type: Literal["chat", "action"]) -> str:
         """ส่งข้อความหรือคำสั่งงานประสานงานแบบ Agent-to-Agent ไปยังเอเจนต์ผู้ช่วยบนแอปมือถือของผู้ใช้คนนั้น
@@ -262,7 +274,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         res = account.send_app_command(uid, command, command_type, sender=config.AGENT_NAME)
         return f"ผู้ใช้ '{display_name}' (id: {uid}): {res}"
 
-    @tool
+    @tool("iot_set")
     def set_device(topic: str, value: str) -> str:
         """ควบคุมหรือสั่งเปลี่ยนค่าอุปกรณ์ IoT ในบ้านผ่าน MQTT
         - topic: topic ของอุปกรณ์ (เช่น 'bedroom/lamp')
@@ -271,7 +283,7 @@ def _make_tools(kill_event: threading.Event, timeout: float, cwd_box: dict, user
         from tools.iot import publish_set
         return publish_set(topic, value)
 
-    @tool
+    @tool("iot_get_state")
     def get_device_state(topic: str) -> str:
         """อ่านสถานะล่าสุดที่บันทึกไว้ของอุปกรณ์ IoT ในบ้านตาม topic ของอุปกรณ์นั้น (เช่น 'bedroom/lamp')"""
         import device_state
@@ -349,6 +361,7 @@ def run(
                 if tool_calls:
                     for tc in tool_calls:
                         _log.info("  เรียก %s(%s)", tc["name"], tc["args"])
+                        _tool_log.info("user=%s group=%s tool=%s", user_id or "-", tool_group(tc["name"]), tc["name"])
                 elif msg.content:
                     final_text = str(msg.content)
                     _log.info("  ตอบ → %s", final_text[:120])
@@ -445,6 +458,7 @@ async def astream_run(
                 if tool_calls:
                     for tc in tool_calls:
                         _log.info("  เรียก %s(%s)", tc["name"], tc["args"])
+                        _tool_log.info("user=%s group=%s tool=%s", user_id or "-", tool_group(tc["name"]), tc["name"])
                         yield {
                             "type": "tool_start",
                             "name": tc["name"],

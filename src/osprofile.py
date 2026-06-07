@@ -11,34 +11,34 @@ _PROFILES = {
         "open_url": "start <url>",
         "disk": "wmic logicaldisk get size,freespace",
         "shutdown": "shutdown /s /t 0",
-        "examples": '''- "เปิด YouTube" → os_exec("start https://youtube.com")
-- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → os_exec("start <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
-- "ดู disk ที่เหลือ" → os_exec("wmic logicaldisk get size,freespace")
-- "shutdown" → os_exec("shutdown /s /t 0")
-- "pause/เล่นเพลง" → os_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]179)"')
-- "เพิ่มเสียง" → os_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]175)"')''',
+        "examples": '''- "เปิด YouTube" → system_exec("start https://youtube.com")
+- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → system_exec("start <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
+- "ดู disk ที่เหลือ" → system_exec("wmic logicaldisk get size,freespace")
+- "shutdown" → system_exec("shutdown /s /t 0")
+- "pause/เล่นเพลง" → system_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]179)"')
+- "เพิ่มเสียง" → system_exec('powershell -c "(New-Object -com WScript.Shell).SendKeys([char]175)"')''',
     },
     "linux": {  # ใช้กับ Raspberry Pi 5 (Debian/ARM) ด้วย
         "open_url": "xdg-open <url>",
         "disk": "df -h",
         "shutdown": "shutdown -h now",
-        "examples": '''- "เปิด YouTube" → os_exec("xdg-open https://youtube.com")
-- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → os_exec("xdg-open <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
-- "ดู disk ที่เหลือ" → os_exec("df -h")
-- "shutdown" → os_exec("shutdown -h now")   # บางเครื่องต้อง sudo
-- "pause/เล่นเพลง" → os_exec("playerctl play-pause")
-- "เพิ่มเสียง" → os_exec("amixer set Master 5%+")''',
+        "examples": '''- "เปิด YouTube" → system_exec("xdg-open https://youtube.com")
+- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → system_exec("xdg-open <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
+- "ดู disk ที่เหลือ" → system_exec("df -h")
+- "shutdown" → system_exec("shutdown -h now")   # บางเครื่องต้อง sudo
+- "pause/เล่นเพลง" → system_exec("playerctl play-pause")
+- "เพิ่มเสียง" → system_exec("amixer set Master 5%+")''',
     },
     "mac": {
         "open_url": "open <url>",
         "disk": "df -h",
         "shutdown": "shutdown -h now",
-        "examples": '''- "เปิด YouTube" → os_exec("open https://youtube.com")
-- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → os_exec("open <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
-- "ดู disk ที่เหลือ" → os_exec("df -h")
-- "shutdown" → os_exec("sudo shutdown -h now")
-- "pause/เล่นเพลง" → os_exec("osascript -e 'tell application \\"Music\\" to playpause'")
-- "เพิ่มเสียง" → os_exec("osascript -e 'set volume output volume (output volume of (get volume settings) + 10)'")''',
+        "examples": '''- "เปิด YouTube" → system_exec("open https://youtube.com")
+- "เปิดเพลง X" → ✅ ค้นก่อนเสมอ: web_search("X เพลง YouTube") → เอา URL "จริง" ที่ได้ → system_exec("open <url>")   (❌ ห้ามมั่ว/เดา URL เองโดยไม่ค้น)
+- "ดู disk ที่เหลือ" → system_exec("df -h")
+- "shutdown" → system_exec("sudo shutdown -h now")
+- "pause/เล่นเพลง" → system_exec("osascript -e 'tell application \\"Music\\" to playpause'")
+- "เพิ่มเสียง" → system_exec("osascript -e 'set volume output volume (output volume of (get volume settings) + 10)'")''',
     },
 }
 
