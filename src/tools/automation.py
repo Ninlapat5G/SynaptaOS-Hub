@@ -6,7 +6,8 @@ automation — เครื่องยนต์งานอัตโนมั�
 ฝั่ง Hub ดูแลงานคอมที่ตั้งเวลา/หน่วงเวลา/ทำซ้ำ
 
 กลไก: เก็บงานลงไฟล์ (data/hub_jobs.json) → เธรด scheduler เคาะทุก ~5 วิ → ถึงเวลา
-  → รันงานผ่าน agent ของ Hub (เขียน code/รัน script ได้) → รายงานผลกลับแอปเจ้าของผ่าน FCM
+  → โยนงานเข้า pipeline pool (worker ที่แชร์กับ run_task) → agent ทำ → รายงานผลกลับแอปเจ้าของผ่าน FCM
+  (เข้า pool = concurrency คุมรวมที่เดียว ไม่ spawn thread เองทุกงานจนถล่ม DGX)
 
 trigger 3 แบบ:
   - delay : รันครั้งเดียวอีก N วินาที
@@ -59,27 +60,32 @@ def _next_run(mode: str, value: str) -> float:
 
 
 def _fire(job: dict) -> None:
-    """รันงาน 1 ตัวในเธรดแยก → รายงานผลกลับแอปเจ้าของ (ไม่บล็อก scheduler)"""
-    import agent
+    """โยนงานเข้า pipeline pool (ไม่รันเอง/ไม่ spawn thread) → worker รัน agent + รายงานผลกลับผ่าน reply"""
+    import pipeline
+    from pipeline.task import AgentTask
     from tools import account
 
-    def work():
-        _log.info("[job:%s] รัน: %s", job["name"], job["task"][:80])
-        try:
-            # history=[] → ไม่ดึง/ไม่เขียน session แชทของผู้ใช้ (งานอัตโนมัติแยกจากบทสนทนา)
-            result = agent.run(job["task"], user_id=job["user_id"] or None, history=[])  # allow_power=False
-        except Exception as e:
-            result = f"[error] {e}"
-        # รายงานกลับแอปเจ้าของแบบไม่รอผลตอบ (เป็นการแจ้งผล ไม่ใช่ขอให้ทำต่อ)
-        if job["user_id"]:
+    name, uid = job["name"], job["user_id"]
+
+    def report(result: str) -> None:
+        # reply = แจ้งผลกลับแอปเจ้าของ (ไม่รอผลตอบ — เป็นการแจ้ง ไม่ใช่ขอให้ทำต่อ)
+        if uid:
             account.send_app_command(
-                job["user_id"],
-                f"งานอัตโนมัติ «{job['name']}» ทำเสร็จแล้ว: {result}",
+                uid, f"งานอัตโนมัติ «{name}» ทำเสร็จแล้ว: {result}",
                 "chat", sender=config.AGENT_NAME, wait=False,
             )
-        _log.info("[job:%s] เสร็จ: %s", job["name"], str(result)[:80])
+        _log.info("[job:%s] เสร็จ: %s", name, str(result)[:80])
 
-    threading.Thread(target=work, daemon=True).start()
+    # block=False → คิวเต็มก็ไม่บล็อก scheduler (ข้ามรอบนี้ · งาน every จะลองใหม่รอบหน้า)
+    ok = pipeline.submit(AgentTask(
+        task=job["task"], user_id=uid or None, source="automation",
+        history=[],          # งานอัตโนมัติ ไม่ยุ่ง session แชทของผู้ใช้ · allow_power=False (ดีฟอลต์)
+        reply=report,
+    ), block=False)
+    if ok:
+        _log.info("[job:%s] เข้า pool: %s", name, job["task"][:80])
+    else:
+        _log.warning("[job:%s] pool คิวเต็ม — ข้ามรอบนี้", name)
 
 
 def _tick() -> None:
