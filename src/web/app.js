@@ -1619,7 +1619,7 @@ function App() {
     <div className="min-h-screen">
       <Header tab={tab} setTab={setTab} online={online} hasToken={!!TOKEN} onLogout={logout} />
       {/* คงทุกแท็บไว้ (ซ่อน/โชว์ด้วย display) — สลับแท็บแล้วข้อมูลแต่ละหน้าไม่หาย ไม่ต้องโหลดใหม่ */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 overflow-hidden">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 overflow-x-hidden">
         <div style={{ display: tab === 'users' ? '' : 'none' }}>
           <motion.div animate={tab === 'users' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
             <UsersTab users={users} reloadUsers={reloadUsers} liveUpdate={liveUpdate} />
