@@ -55,7 +55,9 @@ if _fcm and not os.path.isabs(_fcm):
 FCM_CREDENTIALS = _fcm
 
 # ── Agent pipeline (thread pool + task queue — รองรับหลาย user พร้อมกันแบบมี backpressure) ──
-AGENT_WORKERS   = int(os.getenv("AGENT_WORKERS", "4"))     # จำนวน worker thread ที่รัน agent พร้อมกัน
+# AGENT_WORKERS ควรตั้งให้ "เท่ากับ OLLAMA_NUM_PARALLEL บน DGX" (ตอนนี้ = 8) เพื่อใช้ slot
+# ขนานของ gemma ให้เต็ม — น้อยไป = DGX ว่างแต่งานจ่อคิว, มากไป = request เกินไปจ่อในคิวของ Ollama เอง
+AGENT_WORKERS   = int(os.getenv("AGENT_WORKERS", "8"))     # = OLLAMA_NUM_PARALLEL บน DGX
 AGENT_QUEUE_MAX = int(os.getenv("AGENT_QUEUE_MAX", "100")) # คิวงานสูงสุด (เต็ม = ปฏิเสธ/รอ ไม่ spawn ไม่จำกัด)
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
