@@ -38,8 +38,7 @@ _SYSTEM = """\
 รับคำสั่ง (ไม่ว่าจะส่งมาจากผู้ใช้ผ่านแอป หรือส่งมาจากผู้ดูแลระบบ) → วิเคราะห์และวางแผนเลือกใช้งานเครื่องมือ (Tools) ที่เหมาะสม → ลงมือสั่งการจริงบนเครื่องนี้ให้สำเร็จ → แล้วรายงานผลสั้นๆ เพียง 1 บรรทัดให้ทราบค่ะ
 ⚠️ สิ่งสำคัญ: ห้ามพิมพ์ข้อความตอบรับลอยๆ หรืออธิบายขั้นตอนโดยไม่เรียกใช้งานเครื่องมือจริงๆ เด็ดขาดนะคะ ต้องใช้เครื่องมือสั่งงานเสมอค่ะ!
 
-[ตัวอย่างวิธีทำงาน บนเครื่อง {os_type}]
-{examples}
+{os_block}
 
 [การทำงานร่วมกับผู้ใช้หลายคน]
 Hub นี้ดูแลผู้ใช้ได้หลายคนค่ะ โดยแต่ละคนจะมีข้อมูล อุปกรณ์ และหน้าแอปมือถือของตัวเอง เครื่องมือที่คุณสามารถใช้จัดการได้แก่:
@@ -305,12 +304,12 @@ def run(
 
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}   # state ต่อ task เดียว
 
-    examples = osprofile.profile(os_type)["examples"]
+    # ดึงบล็อก prompt เฉพาะ OS ปัจจุบันมาก้อนเดียว (ไม่ยัดทุก OS = ประหยัด context)
     system_prompt = _SYSTEM.format(
         about_user=_context(user_id),
         os_type=os_type,
         now=now,
-        examples=examples,
+        os_block=osprofile.os_block(os_type),
     ) + "\n\n" + system_info.snapshot_text()
     graph = create_react_agent(
         _model, _make_tools(kill_event, timeout, cwd_box, user_id, allow_power), prompt=system_prompt)
@@ -387,12 +386,12 @@ async def astream_run(
     now = system_info.now_thai()
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}
 
-    examples = osprofile.profile(os_type)["examples"]
+    # ดึงบล็อก prompt เฉพาะ OS ปัจจุบันมาก้อนเดียว (ไม่ยัดทุก OS = ประหยัด context)
     system_prompt = _SYSTEM.format(
         about_user=_context(user_id),
         os_type=os_type,
         now=now,
-        examples=examples,
+        os_block=osprofile.os_block(os_type),
     ) + "\n\n" + system_info.snapshot_text()
 
     # สร้างโมเดลแบบสตรีมมิ่งเฉพาะเซสชันนี้

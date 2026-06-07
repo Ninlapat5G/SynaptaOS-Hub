@@ -46,3 +46,13 @@ _PROFILES = {
 def profile(os_type: str) -> dict:
     """คืน command profile ของ OS — ไม่รู้จักก็ตกมาที่ linux (ปลอดภัยสุดสำหรับ RPi/server)"""
     return _PROFILES.get(os_type, _PROFILES["linux"])
+
+
+def os_block(os_type: str) -> str:
+    """คืน 'บล็อก prompt เฉพาะ OS' ทั้งก้อน (ส่วนของ system prompt ที่ต่างกันตาม OS)
+
+    ดึงมาเฉพาะ OS ปัจจุบันเท่านั้น — ไม่ยัดทั้ง 3 OS เข้า prompt = ประหยัด context
+    อยากเพิ่ม guidance เฉพาะ OS (กฎ/ข้อควรระวัง/path) → เติมในก้อนนี้ที่เดียว ไม่ต้องแตะ agent.py
+    """
+    p = profile(os_type)
+    return f"[ตัวอย่างวิธีทำงาน บนเครื่อง {os_type}]\n{p['examples']}"
