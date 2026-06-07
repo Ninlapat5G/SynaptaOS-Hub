@@ -91,6 +91,7 @@ def send_app_command(user_id: str, command: str, command_type: str, sender: str 
         hub_response.arm(corr_id, user_id)
     sent = fcm_push.send(user_id, title, body, {
         "corr_id": corr_id,
+        "user_id": user_id,   # ให้ App แนบกลับมาตอนตอบ ACK เพื่อยืนยันว่าตอบ "คำสั่งนี้" ของ "user นี้" จริง
         "sender": sender,
         "type": command_type,
         ("text" if command_type == "chat" else "action_prompt"): command,

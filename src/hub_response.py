@@ -5,6 +5,8 @@ hub_response — รับ "ผลลัพธ์" ที่ App ส่งกล
 ตอนนี้: App (เฉพาะตอนแอปเปิด/foreground process) ทำงานเสร็จ → publish ผลกลับมาที่
   {base}/users/<uid>/hub_response   (MQTT5)
 พร้อมแนบ "ตัวตนเครื่องที่ตอบ" ใน MQTT5 user properties (device_id/user_id) ให้ Hub มั่นใจว่ามาจากใครจริง ๆ
+และสะท้อน user_id ที่ Hub แนบไปกับ FCM ตอนแรกกลับมาในตัว payload ด้วย (echo) — ปิดวงจรได้ก็ต่อเมื่อ
+corr_id + user_id ตรงกันทั้งคู่ เท่านั้น (กันกรณี token เพี้ยน/ตอบมั่ว/ผิดเครื่อง)
 
 Hub subscribe ค้างไว้ แล้วจับคู่ด้วย corr_id → ปลุก thread ที่กำลังรอผลอยู่ (account.send_app_command)
 ถ้า App พับ/ถูกฆ่า = ไม่มีใครตอบ → ฝั่งที่รอจะ timeout เองแล้วบอกว่า "ส่งแล้ว เดี๋ยวทำตอนเปิดแอป"
@@ -74,6 +76,7 @@ def start() -> None:
         corr_id = data.get("corr_id", "")
         if not corr_id:
             return
+        echoed_uid = str(data.get("user_id", ""))
 
         # ตัวตนเครื่องที่ตอบ — อ่านจาก MQTT5 user properties (เชื่อถือได้กว่ายัดใน payload)
         device_id, claimed_uid = "", ""
@@ -88,10 +91,11 @@ def start() -> None:
             w = _waiters.get(corr_id)
             if not w:
                 return
-            # ยืนยันว่ามาจากผู้ใช้ที่เราส่งไปจริง (topic + user property ต้องตรงกัน กันตอบมั่ว/ผิดเครื่อง)
-            if topic_uid != w["uid"] or (claimed_uid and claimed_uid != w["uid"]):
-                _log.warning("ทิ้งผลที่ไม่ตรงเจ้าของ: corr=%s topic_uid=%s claimed=%s รอ=%s",
-                             corr_id, topic_uid, claimed_uid, w["uid"])
+            # ปิดวงจรได้ก็ต่อเมื่อ corr_id (จับคู่จาก dict key) และ user_id ที่ App แนบกลับมาตรงกับที่ Hub ส่งไปจริง
+            # (echoed_uid = ค่าที่ส่งไปใน FCM payload ตอนแรก ต้องสะท้อนกลับมาเหมือนเดิม — กันตอบมั่ว/ผิดเครื่อง/token เพี้ยน)
+            if topic_uid != w["uid"] or echoed_uid != w["uid"] or (claimed_uid and claimed_uid != w["uid"]):
+                _log.warning("ทิ้งผลที่ไม่ตรงเจ้าของ: corr=%s topic_uid=%s echoed=%s claimed=%s รอ=%s",
+                             corr_id, topic_uid, echoed_uid, claimed_uid, w["uid"])
                 return
             w["result"] = {
                 "ok": bool(data.get("ok")),
