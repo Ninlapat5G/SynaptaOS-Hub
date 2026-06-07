@@ -1002,6 +1002,138 @@ function AgentTab({ users, msgs, setMsgs, ctxUser, setCtxUser }) {
   );
 }
 
+// ── ตั้งค่าระบบ (schema-driven) — แก้ทุก knob ผ่านเว็บ แยกหมวด + ป้าย hot/restart ──
+function SettingsPanel() {
+  const [cats, setCats] = useState(null);
+  const [draft, setDraft] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  const load = useCallback(async () => {
+    setMsg(null);
+    try {
+      const d = await api('/admin/api/settings/all');
+      setCats(d.categories || []);
+      const init = {};
+      (d.categories || []).forEach((c) => c.fields.forEach((f) => {
+        init[f.key] = f.type === 'bool' ? (String(f.value).toLowerCase() === 'true') : (f.value || '');
+      }));
+      setDraft(init);
+    } catch (e) { if (e.message !== 'unauthorized') setMsg({ ok: false, text: e.message }); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const setVal = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const values = {};
+      Object.keys(draft).forEach((k) => { values[k] = typeof draft[k] === 'boolean' ? String(draft[k]) : draft[k]; });
+      const r = await api('/admin/api/settings/all', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values }),
+      });
+      if (r.restart_needed) { setConfirmRestart(true); setMsg({ ok: true, text: 'บันทึกแล้ว — บางค่าต้อง restart ถึงจะมีผล' }); }
+      else setMsg({ ok: true, text: (r.changed && r.changed.length) ? '✓ บันทึกแล้ว มีผลทันที' : 'ไม่มีอะไรเปลี่ยน' });
+      setTimeout(load, 600);
+    } catch (e) { if (e.message !== 'unauthorized') setMsg({ ok: false, text: 'บันทึกล้มเหลว: ' + e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const doRestart = async () => {
+    setRestarting(true);
+    try { await api('/admin/api/restart', { method: 'POST' }); } catch (_) {}
+    setTimeout(() => window.location.reload(), 6000); // server หลุดชั่วครู่ตอน re-exec → รอแล้วรีโหลด
+  };
+
+  if (cats === null) return <Card className="p-5"><Spinner text="กำลังโหลดการตั้งค่า..." /></Card>;
+
+  const inputCls = 'w-full bg-bg1/70 border border-line rounded-lg px-3 py-2 text-sm outline-none focus:border-accent transition';
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold">ตั้งค่าระบบ (Settings)</h2>
+        <button onClick={load} className="w-8 h-8 flex items-center justify-center rounded-lg text-inkDim hover:text-accent hover:bg-white/5 transition">
+          <Icon path={ICONS.refresh} className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-5">
+        {cats.map((cat) => (
+          <div key={cat.id}>
+            <div className="text-xs uppercase tracking-wide text-accent2 font-semibold mb-2">{cat.label}</div>
+            <div className="grid sm:grid-cols-2 gap-3">
+              {cat.fields.map((f) => (
+                <div key={f.key} className="glass-soft rounded-xl2 p-3 border border-line/60">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <label className="text-xs text-ink font-medium">{f.label}</label>
+                    {f.hot ? <Badge color="accent">ทันที</Badge> : <Badge color="accent2">restart</Badge>}
+                  </div>
+                  {f.type === 'bool' ? (
+                    <label className="flex items-center gap-2 text-xs text-inkDim cursor-pointer select-none">
+                      <input type="checkbox" checked={!!draft[f.key]} onChange={(e) => setVal(f.key, e.target.checked)} />
+                      {draft[f.key] ? 'เปิด' : 'ปิด'}
+                    </label>
+                  ) : (
+                    <input
+                      type={f.secret ? 'password' : (f.type === 'int' ? 'number' : 'text')}
+                      value={draft[f.key] ?? ''}
+                      onChange={(e) => setVal(f.key, e.target.value)}
+                      placeholder={f.secret ? (f.isSet ? '(ตั้งไว้แล้ว — เว้นว่าง=ไม่เปลี่ยน)' : 'ยังไม่ได้ตั้ง') : ''}
+                      className={inputCls + (f.secret ? ' font-mono' : '')} />
+                  )}
+                  {f.help && <div className="text-[10px] text-inkXdim mt-1">{f.help}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {msg && <div className={'text-xs text-center mt-4 ' + (msg.ok ? 'text-ok' : 'text-danger')}>{msg.text}</div>}
+
+      <div className="flex gap-2 mt-4">
+        <button onClick={save} disabled={busy}
+          className="flex-1 py-2.5 rounded-xl2 font-semibold text-bg0 disabled:opacity-60 transition hover:brightness-110 text-sm"
+          style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>
+          {busy ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+        </button>
+        <button onClick={() => setConfirmRestart(true)} disabled={busy}
+          className="px-4 py-2.5 rounded-xl2 text-sm border border-line text-inkDim hover:text-accent hover:bg-white/5 transition">
+          Restart Hub
+        </button>
+      </div>
+
+      {confirmRestart && (
+        <div className="fixed inset-0 z-50 bg-bg0/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => !restarting && setConfirmRestart(false)}>
+          <div className="glass rounded-xl2 w-full max-w-sm p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            {restarting ? (
+              <Spinner text="กำลัง restart Hub... หน้าจะรีโหลดเองใน ~6 วิ" />
+            ) : (
+              <>
+                <div className="text-3xl mb-2">♻️</div>
+                <h3 className="font-semibold text-ink mb-1">Restart Hub?</h3>
+                <p className="text-xs text-inkDim mb-5">ค่าที่ติดป้าย “restart” จะมีผลหลังรีสตาร์ท · ระหว่างนั้น Hub จะออฟไลน์ชั่วครู่</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmRestart(false)}
+                    className="flex-1 py-2.5 rounded-xl2 text-sm border border-line text-inkDim hover:bg-white/5 transition">ยกเลิก</button>
+                  <button onClick={doRestart}
+                    className="flex-1 py-2.5 rounded-xl2 text-sm font-semibold text-bg0 hover:brightness-110 transition"
+                    style={{ background: 'linear-gradient(120deg,#00D4FF,#B44FFF)' }}>Restart เลย</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ── แท็บ 3: ระบบหลังบ้าน ────────────────────────────────────────────────────
 function SystemTab() {
   const [info, setInfo] = useState('');
@@ -1018,7 +1150,9 @@ function SystemTab() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="flex flex-col gap-4">
+      <SettingsPanel />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold">ข้อมูลเครื่อง</h2>
@@ -1043,6 +1177,7 @@ function SystemTab() {
             ))}
           </div>}
       </Card>
+      </div>
     </div>
   );
 }
