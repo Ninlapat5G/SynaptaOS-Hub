@@ -22,6 +22,11 @@ import config
 
 _log = logging.getLogger("hub_response")
 _client: mqtt.Client | None = None
+_connected = False   # สถานะการต่อ broker (ใช้เป็นสัญญาณ "ระบบพร้อม" ตอนบูต)
+
+
+def is_connected() -> bool:
+    return _connected
 
 _lock = threading.Lock()
 _waiters: dict[str, dict] = {}   # corr_id -> {"event": Event, "result": dict|None, "uid": expected_uid}
@@ -61,10 +66,14 @@ def start() -> None:
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5)
 
     def on_connect(c, u, flags, rc, props=None):
+        global _connected
+        _connected = True
         c.subscribe(sub_topic, qos=1)
         _log.info("เชื่อม broker + subscribe %s", sub_topic)
 
     def on_disconnect(c, u, disconnect_flags, rc, props=None):
+        global _connected
+        _connected = False
         _log.warning("หลุดจาก broker (rc=%s) — paho จะต่อใหม่ให้เอง", rc)
 
     def on_message(c, u, msg):

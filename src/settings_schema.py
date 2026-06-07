@@ -50,6 +50,8 @@ CATEGORIES = [
         {"key": "AGENT_NAME", "label": "ชื่อ Hub (agent name)", "type": "str", "hot": False, "default": "office-pc"},
         {"key": "OS_TYPE", "label": "ระบบปฏิบัติการ (เว้นว่าง = auto)", "type": "str", "hot": False, "default": ""},
         {"key": "DATA_DIR", "label": "โฟลเดอร์เก็บข้อมูล (เว้นว่าง = ค่าปริยาย)", "type": "str", "hot": False, "default": ""},
+        {"key": "AUTO_OPEN_ADMIN", "label": "เปิดหน้า admin อัตโนมัติเมื่อระบบพร้อม", "type": "bool", "hot": False,
+         "default": "true", "help": "ปิดบนเครื่องไม่มีจอ เช่น RPi headless"},
     ]},
 ]
 
