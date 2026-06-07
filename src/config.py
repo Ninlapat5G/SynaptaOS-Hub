@@ -55,9 +55,11 @@ if _fcm and not os.path.isabs(_fcm):
 FCM_CREDENTIALS = _fcm
 
 # ── Agent pipeline (thread pool + task queue — รองรับหลาย user พร้อมกันแบบมี backpressure) ──
-# AGENT_WORKERS ควรตั้งให้ "เท่ากับ OLLAMA_NUM_PARALLEL บน DGX" (ตอนนี้ = 8) เพื่อใช้ slot
-# ขนานของ gemma ให้เต็ม — น้อยไป = DGX ว่างแต่งานจ่อคิว, มากไป = request เกินไปจ่อในคิวของ Ollama เอง
-AGENT_WORKERS   = int(os.getenv("AGENT_WORKERS", "8"))     # = OLLAMA_NUM_PARALLEL บน DGX
+# AGENT_WORKERS = เพดาน concurrency "ต่อ Hub ตัวนี้" (รันงาน agent พร้อมกันได้กี่งาน)
+# ตั้ง 4 ไม่ใช่ 8 (=OLLAMA_NUM_PARALLEL ของ DGX) เพราะ DGX แชร์กันหลาย Hub ในบ้าน →
+# กัน Hub ตัวเดียวกินไม่เกิน 4 slot เหลือเผื่อ Hub อื่น และ 1 Hub แทบไม่ทำเกิน 4 พร้อมกันอยู่แล้ว
+# เกินเพดานก็จ่อคิวไป (ดู AGENT_QUEUE_MAX) ไม่ถล่ม DGX
+AGENT_WORKERS   = int(os.getenv("AGENT_WORKERS", "4"))
 AGENT_QUEUE_MAX = int(os.getenv("AGENT_QUEUE_MAX", "100")) # คิวงานสูงสุด (เต็ม = ปฏิเสธ/รอ ไม่ spawn ไม่จำกัด)
 
 # ── Misc ─────────────────────────────────────────────────────────────────────

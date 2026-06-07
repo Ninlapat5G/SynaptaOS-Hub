@@ -4,8 +4,9 @@ AgentExecutor — แกน concurrency: thread pool + task queue (แบบจ�
 ทำไม thread (ไม่ใช่ process): งาน agent เป็น I/O-bound (รอ LLM ที่ DGX / MQTT / subprocess)
 → thread ขนานงานได้เต็มที่ และ "แชร์ session/store/MQTT client ได้ตรง ๆ" โดยไม่ต้องทำ IPC
 
-DGX เสิร์ฟ gemma แบบขนานได้จริง (Ollama OLLAMA_NUM_PARALLEL — ตอนนี้ตั้งไว้ 8, ไม่ใช่ทำทีละอัน)
-→ ตั้ง AGENT_WORKERS ให้ "เท่ากับ" ค่านั้น เพื่อใช้ slot ขนานให้เต็ม (ดู config.AGENT_WORKERS)
+DGX เสิร์ฟ gemma แบบขนานได้จริง (Ollama OLLAMA_NUM_PARALLEL = 8 slot, ไม่ใช่ทำทีละอัน) แต่ DGX
+แชร์กันหลาย Hub ในบ้าน → AGENT_WORKERS = "เพดานต่อ Hub" (ดีฟอลต์ 4) เผื่อ slot ให้ Hub อื่น
+เกินเพดานก็จ่อคิวไป (ดู config.AGENT_WORKERS)
 
 queue แบบจำกัดขนาด = มี backpressure: งานท่วม → ผู้ส่งรอคิว/ถูกปฏิเสธ
 ไม่ใช่ spawn thread ไม่จำกัดจนเครื่อง/DGX ล้ม (หลาย user พร้อมกันจึงลื่นและคุมได้)
