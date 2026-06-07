@@ -14,6 +14,7 @@ import discovery
 import telemetry
 import device_state
 import hub_response
+import pipeline
 import server
 from tools import system_info, automation
 
@@ -39,6 +40,7 @@ def main():
             ("telemetry", telemetry.start),
             ("devstate", device_state.start),
             ("hub_response", hub_response.start),
+            ("pipeline", pipeline.start),
             ("automation", automation.start),
         ):
             try:
@@ -52,6 +54,7 @@ def main():
         server.run()   # uvicorn (MCP) — ขึ้นทันที ขนานกับบริการพื้นหลังด้านบน
     finally:
         automation.stop()
+        pipeline.stop()
         hub_response.stop()
         device_state.stop()
         telemetry.stop()

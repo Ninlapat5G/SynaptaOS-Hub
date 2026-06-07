@@ -50,6 +50,6 @@ class Api:
 def mount(app):
     """ลงทะเบียนทุก endpoint REST — เพิ่มฟีเจอร์ = import โมดูลใหม่แล้วเติมชื่อในวง for"""
     api = Api(app)
-    from api import sync
-    for mod in (sync,):
+    from api import sync, pipeline
+    for mod in (sync, pipeline):
         mod.register(api)

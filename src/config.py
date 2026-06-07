@@ -54,6 +54,10 @@ if _fcm and not os.path.isabs(_fcm):
     _fcm = str(Path(__file__).resolve().parent / _fcm)
 FCM_CREDENTIALS = _fcm
 
+# ── Agent pipeline (thread pool + task queue — รองรับหลาย user พร้อมกันแบบมี backpressure) ──
+AGENT_WORKERS   = int(os.getenv("AGENT_WORKERS", "4"))     # จำนวน worker thread ที่รัน agent พร้อมกัน
+AGENT_QUEUE_MAX = int(os.getenv("AGENT_QUEUE_MAX", "100")) # คิวงานสูงสุด (เต็ม = ปฏิเสธ/รอ ไม่ spawn ไม่จำกัด)
+
 # ── Misc ─────────────────────────────────────────────────────────────────────
 COMMAND_TIMEOUT = float(os.getenv("COMMAND_TIMEOUT", "60"))
 SERPER_API_KEY  = os.getenv("SERPER_API_KEY", "")
