@@ -255,6 +255,74 @@ def mount(app, mcp):
             
         return JSONResponse({"status": "updated"})
 
+    # ── ตั้งค่าระบบ (schema-driven) — แก้ทุก knob ผ่านเว็บ แยกหมวด + ป้าย hot/restart ──
+    @route("/admin/api/settings/all", methods=["GET"])
+    async def api_get_settings(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        import settings_schema
+        cats = []
+        for cat in settings_schema.CATEGORIES:
+            fields = []
+            for f in cat["fields"]:
+                raw = config.env_value(f["key"], f.get("default", ""))
+                secret = f.get("secret", False)
+                fields.append({
+                    "key": f["key"], "label": f["label"], "type": f["type"],
+                    "hot": f.get("hot", False), "secret": secret, "help": f.get("help", ""),
+                    "value": "" if secret else raw,        # secret ไม่ส่งค่าจริงออกไป
+                    "isSet": bool(raw) if secret else None, # บอกแค่ว่า "ตั้งไว้แล้วไหม"
+                })
+            cats.append({"id": cat["id"], "label": cat["label"], "fields": fields})
+        return JSONResponse({"categories": cats})
+
+    @route("/admin/api/settings/all", methods=["POST"])
+    async def api_save_settings(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        import settings_schema, dotenv
+        fmap = settings_schema.field_map()
+        env_file = str(Path(config.__file__).resolve().parent / ".env")
+        values = body.get("values") or {}
+        restart_needed = False
+        changed = []
+        for key, val in values.items():
+            f = fmap.get(key)
+            if not f:
+                continue
+            val = "" if val is None else str(val)
+            if f.get("secret") and val == "":
+                continue   # เว้นว่าง = ไม่เปลี่ยนค่า secret เดิม
+            old = config.env_value(key, f.get("default", ""))
+            if val == old:
+                continue   # ไม่เปลี่ยน ข้าม
+            try:
+                dotenv.set_key(env_file, key, val)
+            except Exception as e:
+                return JSONResponse({"error": f"save {key} failed: {e}"}, status_code=500)
+            changed.append(key)
+            if not f.get("hot", False):
+                restart_needed = True
+        return JSONResponse({"status": "saved", "changed": changed, "restart_needed": restart_needed})
+
+    @route("/admin/api/restart", methods=["POST"])
+    async def api_restart(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        # ตอบ response ก่อน แล้วค่อย re-exec ทั้งโปรเซส (โหลด config/บริการใหม่ทั้งหมด)
+        import threading, os, sys, time
+
+        def _do():
+            time.sleep(0.7)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        threading.Thread(target=_do, daemon=True).start()
+        return JSONResponse({"status": "restarting"})
+
     # API ควบคุมอุปกรณ์ IoT ผ่าน MQTT
     @route("/admin/api/devices/control", methods=["POST"])
     async def api_control_device(request):

@@ -296,7 +296,7 @@ def run(
     allow_power: bool = False,
 ) -> str:
     os_type    = os_type or config.OS_TYPE
-    timeout    = timeout if timeout is not None else config.COMMAND_TIMEOUT
+    timeout    = timeout if timeout is not None else config.get_command_timeout()
     kill_event = kill_event or threading.Event()
     now        = now or system_info.now_thai()
 
@@ -385,7 +385,7 @@ async def astream_run(
     from langgraph.prebuilt import create_react_agent
     
     os_type = config.OS_TYPE
-    timeout = config.COMMAND_TIMEOUT
+    timeout = config.get_command_timeout()
     kill_event = asyncio.Event()
     now = system_info.now_thai()
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}

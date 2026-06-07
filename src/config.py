@@ -34,6 +34,34 @@ def get_mcp_token() -> str:
     load_dotenv(_ENV_FILE, override=True)
     return os.getenv("MCP_TOKEN", "")
 
+
+def env_value(key: str, default: str = "") -> str:
+    """อ่านค่าล่าสุดจาก .env แบบสด — สำหรับค่าที่แก้ผ่านเว็บแล้วอยากให้มีผลทันที (hot)"""
+    load_dotenv(_ENV_FILE, override=True)
+    return os.getenv(key, default)
+
+
+# ── ค่า hot (อ่านสดทุกครั้ง = แก้ผ่านเว็บแล้วมีผลเลย ไม่ต้อง restart) ──
+def get_session_ttl_sec() -> int:
+    try:
+        return max(60, int(env_value("SESSION_TTL_MIN", "30")) * 60)
+    except Exception:
+        return 1800
+
+
+def get_session_max() -> int:
+    try:
+        return max(1, int(env_value("SESSION_MAX_MSGS", "10")))
+    except Exception:
+        return 10
+
+
+def get_command_timeout() -> float:
+    try:
+        return float(env_value("COMMAND_TIMEOUT", "60"))
+    except Exception:
+        return 60.0
+
 # ── MQTT (App↔Node + Hub broadcast discovery) — แยกขาดจาก Tailscale ──────────
 MQTT_BROKER  = os.getenv("MQTT_BROKER", "broker.hivemq.com")
 MQTT_PORT    = int(os.getenv("MQTT_PORT", "1883"))

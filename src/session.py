@@ -6,22 +6,23 @@ session — ความจำบทสนทนาชั่วคราวต�
 
 เก็บแยกตาม user_id (ของใครของมัน) + ล้างทิ้งเมื่อไม่มีความเคลื่อนไหวเกิน TTL
 (กัน RAM บวม + กันบทสนทนาคนละเรื่อง/คนละช่วงเวลามาปนกัน)
+
+TTL (กี่นาที) และจำนวนข้อความที่เก็บ อ่านสดจาก config (แก้ผ่านเว็บ admin ได้ มีผลทันที)
 """
 
 import threading
 import time
 
-_TTL = 1800   # เงียบเกิน 30 นาที = ล้าง session ทิ้ง
-_MAX = 10     # เก็บข้อความล่าสุดกี่ข้อความ (พอให้จำบริบท ไม่บวม)
+import config
 
 _lock = threading.Lock()
 _sessions: dict[str, dict] = {}   # user_id -> {"msgs": [{"role","text"}...], "ts": epoch}
 
 
-def _prune() -> None:
+def _prune(ttl: float) -> None:
     """ลบ session ที่เงียบนานเกิน TTL (เรียกใต้ _lock แล้ว)"""
     now = time.time()
-    for uid in [u for u, s in _sessions.items() if now - s["ts"] > _TTL]:
+    for uid in [u for u, s in _sessions.items() if now - s["ts"] > ttl]:
         del _sessions[uid]
 
 
@@ -30,7 +31,7 @@ def get(user_id: str | None) -> list:
     if not user_id:
         return []
     with _lock:
-        _prune()
+        _prune(config.get_session_ttl_sec())
         s = _sessions.get(user_id)
         return list(s["msgs"]) if s else []
 
@@ -43,5 +44,5 @@ def append(user_id: str | None, role: str, text: str) -> None:
     with _lock:
         s = _sessions.setdefault(user_id, {"msgs": [], "ts": 0})
         s["msgs"].append({"role": role, "text": text})
-        s["msgs"] = s["msgs"][-_MAX:]
+        s["msgs"] = s["msgs"][-config.get_session_max():]
         s["ts"] = time.time()
