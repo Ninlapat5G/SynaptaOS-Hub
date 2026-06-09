@@ -97,6 +97,8 @@ def send_app_command(user_id: str, command: str, command_type: str, sender: str 
         ("text" if command_type == "chat" else "action_prompt"): command,
     })
     if not sent:
+        if wait:
+            hub_response.disarm(corr_id)   # arm ไว้แล้วแต่ส่งไม่ออก — ถอนทิ้ง ไม่ให้ waiter ค้าง (รั่ว)
         _log.warning("ส่ง FCM ให้ %s ไม่สำเร็จ (ไม่มี fcmToken/FCM ปิด)", user_id)
         return f"ส่งไม่สำเร็จ — แอปนี้ยังไม่มี fcmToken หรือ FCM ปิดอยู่ (corr_id: {corr_id})"
 

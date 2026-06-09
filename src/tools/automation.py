@@ -19,6 +19,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -143,7 +144,7 @@ def register(mcp):
         except Exception as e:
             return f"ตั้งงานไม่ได้: {e}"
         job = {
-            "id": f"job-{int(time.time())}-{len(_jobs)}",
+            "id": f"job-{uuid.uuid4().hex[:10]}",   # uuid กัน id ชน (เดิม epoch+len ชนได้ในวินาทีเดียวกัน)
             "user_id": user_id, "name": name or task[:30], "mode": mode,
             "value": value, "task": task, "next_run": nr, "enabled": True,
         }

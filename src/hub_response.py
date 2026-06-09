@@ -47,6 +47,12 @@ def arm(corr_id: str, expected_uid: str) -> None:
         _waiters[corr_id] = {"event": threading.Event(), "result": None, "uid": expected_uid}
 
 
+def disarm(corr_id: str) -> None:
+    """ยกเลิกการรอ (เช่น arm ไปแล้วแต่ส่ง FCM ไม่สำเร็จ) — ไม่ลบจะค้างใน dict ตลอด (รั่ว)"""
+    with _lock:
+        _waiters.pop(corr_id, None)
+
+
 def collect(corr_id: str, timeout: float) -> dict | None:
     """รอผลของ corr_id ที่ arm ไว้ จนได้ผล หรือครบ timeout (วินาที)
     คืน dict {ok, detail, device_id} ถ้าได้ทัน · None ถ้า timeout"""
@@ -54,10 +60,11 @@ def collect(corr_id: str, timeout: float) -> dict | None:
         w = _waiters.get(corr_id)
     if not w:
         return None
-    got = w["event"].wait(timeout)
+    w["event"].wait(timeout)
     with _lock:
         w = _waiters.pop(corr_id, None)
-    return w["result"] if (got and w) else None
+    # อ่าน result ตรง ๆ ไม่อิงว่า wait ทันไหม — ผลที่มาเฉียดเส้น timeout จะได้ไม่ถูกทิ้ง
+    return w["result"] if w else None
 
 
 def start() -> None:

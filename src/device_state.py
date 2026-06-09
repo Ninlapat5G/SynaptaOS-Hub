@@ -56,7 +56,11 @@ def _save() -> None:
 
 def _flush_loop() -> None:
     """เขียนลงดิสก์เป็นระยะ (ไม่เกินทุก 10 วิ) — coalesce การเปลี่ยนถี่ ๆ ของ sensor ไม่ให้เขียนรัว"""
-    _save()
+    try:
+        _save()
+    except Exception as e:
+        # _save พังครั้งเดียวต้องไม่ฆ่าลูป Timer — ไม่งั้นสถานะจะไม่ถูกเซฟอีกเลยจนรีสตาร์ต
+        _log.error("เซฟ devstate ล้มเหลว (จะลองใหม่รอบหน้า): %s", e)
     t = threading.Timer(10, _flush_loop)
     t.daemon = True
     t.start()
@@ -123,17 +127,26 @@ def start() -> None:
             val = msg.payload.decode("utf-8")
         except Exception:
             return
-        cur = _state.get(rel)
-        if cur and cur.get("value") == val:
-            return  # ค่าเดิม ไม่ต้อง mark dirty
-        _state[rel] = {"value": val, "ts": int(time.time())}
-        _dirty = True
+        # แก้ _state ใต้ lock — _save() (Timer thread) กำลัง json.dumps(_state) อยู่ได้
+        # ถ้าเขียนแทรกโดยไม่ล็อกจะเจอ "dictionary changed size during iteration"
+        with _lock:
+            cur = _state.get(rel)
+            if cur and cur.get("value") == val:
+                return  # ค่าเดิม ไม่ต้อง mark dirty
+            _state[rel] = {"value": val, "ts": int(time.time())}
+            _dirty = True
         _log.info("อุปกรณ์ %s = %s", rel, val)
         try:
             import webadmin
             webadmin.broadcast_device_state(rel, val)
         except Exception as e:
             _log.error("Failed to broadcast device state: %s", e)
+        # ป้อนเข้าระบบ event-driven (ชั้น A) → rule engine จับคู่กฎเอง (ค่าซ้ำถูกกรองไปแล้วด้านบน)
+        try:
+            import events
+            events.publish(events.Event(type="device", key=rel, value=val))
+        except Exception as e:
+            _log.error("publish event ล้มเหลว: %s", e)
 
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
@@ -154,6 +167,12 @@ def get(device_topic: str) -> str | None:
     """ค่าสถานะล่าสุดของอุปกรณ์ (None = ยังไม่เคยรู้จัก)"""
     e = _state.get(device_topic)
     return e.get("value") if e else None
+
+
+def last_seen(device_topic: str) -> int | None:
+    """เวลา (epoch) ที่เห็นค่าอุปกรณ์ล่าสุด — ใช้เช็ค online/offline (None = ไม่เคยเห็น)"""
+    e = _state.get(device_topic)
+    return e.get("ts") if e else None
 
 
 def stop() -> None:

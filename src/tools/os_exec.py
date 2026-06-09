@@ -9,6 +9,7 @@ Stateless per-request: ไม่มี global cwd แล้ว — cwd เก็
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 _BASE = str(Path(__file__).resolve().parent.parent)
@@ -89,22 +90,30 @@ def run(
             errors="replace",
         )
 
+        # อ่าน output ใน thread แยก — ห้ามอ่านใน thread หลัก เพราะคำสั่งที่ค้าง (ไม่ปิด stdout)
+        # จะทำให้ timeout ไม่เคยถูกเช็ค → worker ของ pipeline ค้างถาวรทีละตัวจนระบบตาย
         lines: list[str] = []
-        for line in proc.stdout:
+
+        def _read_output():
+            for line in proc.stdout:
+                lines.append(line.rstrip())
+
+        reader = threading.Thread(target=_read_output, daemon=True)
+        reader.start()
+
+        deadline = time.monotonic() + timeout
+        while proc.poll() is None:
             if kill_event and kill_event.is_set():
+                proc.kill()
+                return "[cancelled]"
+            if time.monotonic() >= deadline:
+                proc.kill()
+                lines.append(f"[timeout after {timeout:.0f}s]")
+                exit_status = "timeout"
                 break
-            lines.append(line.rstrip())
+            time.sleep(0.2)
 
-        if kill_event and kill_event.is_set():
-            proc.kill()
-            return "[cancelled]"
-
-        try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            lines.append(f"[timeout after {timeout:.0f}s]")
-            exit_status = "timeout"
+        reader.join(2)  # เก็บ output ที่เหลือ (กันอ่านไม่ครบตอน process เพิ่งจบ)
 
         if proc.returncode and exit_status == "ok":
             exit_status = "error"

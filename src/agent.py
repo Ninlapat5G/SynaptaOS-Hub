@@ -318,6 +318,16 @@ def run(
     if use_session:
         history = session.get(user_id)
 
+    # สลับสมอง: workflow (LlamaIndex) แทน ReAct — session/ประวัติแก้ที่นี่ที่เดียว แล้วส่งต่อ
+    if config.BRAIN == "workflow":
+        import brain
+        result = brain.run(task, user_id=user_id, history=history, allow_power=allow_power)
+        # ผลที่เป็น error ไม่เก็บลง session — กันข้อความพังค้างเป็นบริบทให้งานถัดไปเพี้ยนตาม
+        if result and use_session and not result.startswith("[error]"):
+            session.append(user_id, "user", task)
+            session.append(user_id, "agent", result)
+        return result
+
     cwd_box = {"cwd": str(Path(__file__).resolve().parent)}   # state ต่อ task เดียว
 
     # ดึงบล็อก prompt เฉพาะ OS ปัจจุบันมาก้อนเดียว (ไม่ยัดทุก OS = ประหยัด context)
@@ -392,6 +402,13 @@ async def astream_run(
     - สตรีมสถานะเรียกเครื่องมือเสร็จสิ้น (tool_end)
     - สตรีมตัวอักษรของคำตอบสุดท้ายแบบลื่นไหล (reply_chunk)
     """
+    # สลับสมอง: workflow (LlamaIndex) — ส่ง event รูปเดียวกันออกไป ฝั่งหน้าเว็บไม่ต้องแก้
+    if config.BRAIN == "workflow":
+        import brain
+        async for ev in brain.astream_run(task, user_id=user_id, history=history, allow_power=allow_power):
+            yield ev
+        return
+
     import asyncio
     from langchain_core.messages import HumanMessage, AIMessage
     from langchain_openai import ChatOpenAI
