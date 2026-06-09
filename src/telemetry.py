@@ -53,6 +53,12 @@ def start() -> None:
         _log.info("รับ telemetry จาก %s: แบต %s%%%s",
                   uid, data.get("level", "?"),
                   " (กำลังเคลื่อนที่)" if data.get("moving") else "")
+        # ป้อนเข้าระบบ event-driven → กฎที่อิงแบต/ชาร์จของคนนี้ถูกประเมินทันที (ไม่ต้องรอ tick)
+        try:
+            import events
+            events.publish(events.Event(type="phone", key=uid, value=str(data.get("level", "")), user_id=uid))
+        except Exception as e:
+            _log.error("publish event ล้มเหลว: %s", e)
 
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect

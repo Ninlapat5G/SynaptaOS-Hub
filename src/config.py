@@ -71,6 +71,12 @@ MQTT_BASE    = os.getenv("MQTT_BASE_TOPIC", "").rstrip("/")
 # ── Identity ─────────────────────────────────────────────────────────────────
 AGENT_NAME = os.getenv("AGENT_NAME", "office-pc")
 
+# ── Brain (สมองที่ใช้รันงาน agent) ───────────────────────────────────────────
+# "workflow" = LlamaIndex Workflow (มี reflect) — ดีฟอลต์ · ทดสอบ tool-calling กับ gemma บน DGX ผ่านแล้ว
+# "react"    = ReAct เดิม (LangGraph) — ตั้ง BRAIN=react ใน .env เพื่อย้อนกลับได้ทันทีถ้ามีปัญหา
+# หมายเหตุ: มีผลกับ agent.run (App run_task / automation / rule escalation) · แชทสตรีมหน้า admin ยังใช้ react
+BRAIN = os.getenv("BRAIN", "workflow").strip().lower()
+
 # ── Storage (ข้อมูลต่อ user — เก็บแยกไฟล์ รองรับ multi-user) ──────────────────
 DATA_DIR = os.getenv("DATA_DIR") or str(Path(__file__).resolve().parent / "data")
 
@@ -84,8 +90,8 @@ FCM_CREDENTIALS = _fcm
 
 # ── Agent pipeline (thread pool + task queue — รองรับหลาย user พร้อมกันแบบมี backpressure) ──
 # AGENT_WORKERS = เพดาน concurrency "ต่อ Hub ตัวนี้" (รันงาน agent พร้อมกันได้กี่งาน)
-# ตั้ง 4 ไม่ใช่ 8 (=OLLAMA_NUM_PARALLEL ของ DGX) เพราะ DGX แชร์กันหลาย Hub ในบ้าน →
-# กัน Hub ตัวเดียวกินไม่เกิน 4 slot เหลือเผื่อ Hub อื่น และ 1 Hub แทบไม่ทำเกิน 4 พร้อมกันอยู่แล้ว
+# DGX เสิร์ฟ gemma ขนานได้ OLLAMA_NUM_PARALLEL = 4 slot → ตั้งเพดานต่อ Hub = 4 ให้พอดีกับ DGX
+# (ถ้ามีหลาย Hub แชร์ DGX ตัวเดียว ควรลดเลขนี้ลง เผื่อ slot ให้ Hub อื่น ไม่ให้ตัวเดียวกินหมด)
 # เกินเพดานก็จ่อคิวไป (ดู AGENT_QUEUE_MAX) ไม่ถล่ม DGX
 AGENT_WORKERS   = int(os.getenv("AGENT_WORKERS", "4"))
 AGENT_QUEUE_MAX = int(os.getenv("AGENT_QUEUE_MAX", "100")) # คิวงานสูงสุด (เต็ม = ปฏิเสธ/รอ ไม่ spawn ไม่จำกัด)
