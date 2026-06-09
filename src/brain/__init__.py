@@ -57,7 +57,17 @@ def run(task: str, user_id: str | None = None, history: list | None = None,
     _log.info("รับงาน (workflow)%s: %s", f" (user={user_id})" if user_id else "", task[:120])
 
     async def _go():
-        return await wf.run(task=task)   # wf.run() ต้องถูกเรียกใน event loop (สร้าง task ข้างใน)
+        try:
+            return await wf.run(task=task)   # wf.run() ต้องถูกเรียกใน event loop (สร้าง task ข้างใน)
+        finally:
+            # ปิด http client ของงานนี้ "ใน loop นี้เลย" — ถ้าปล่อยให้ GC ปิดทีหลัง
+            # มันจะไปเจอ loop ที่ถูกปิดไปแล้ว เกิด traceback "Event loop is closed" รก log ทุกงาน
+            aclient = getattr(wf.llm, "_aclient", None)
+            if aclient is not None:
+                try:
+                    await aclient.close()
+                except Exception:
+                    pass
 
     try:
         return str(asyncio.run(_go()))
