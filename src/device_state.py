@@ -14,6 +14,7 @@ topic อุปกรณ์อยู่ใน namespace MQTT รวม (ไม�
 import json
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -27,6 +28,7 @@ _log = logging.getLogger("devstate")
 
 _client: mqtt.Client | None = None
 _state: dict[str, dict] = {}     # device topic (relative) → {"value": str, "ts": int}
+_nodes: dict[str, str] = {}      # nodeId → "online"/"offline" (จาก {base}/nodes/+/status — retained, broker ส่งให้ใหม่ทุกครั้งที่ต่อ)
 _subscribed: set[str] = set()    # state topic เต็มที่ sub ไปแล้ว
 _lock = threading.Lock()
 _dirty = False
@@ -113,6 +115,8 @@ def start() -> None:
     def on_connect(c, u, flags, rc, props=None):
         _subscribed.clear()  # reconnect = broker ลืม sub หมด → sub ใหม่ตาม kd ปัจจุบัน
         _resync()
+        # สถานะ node (online/offline + LWT) — ใช้ตัดสินอุปกรณ์ออนไลน์แทนการเดาจากเวลา state
+        c.subscribe(config.topic("nodes/+/status"), qos=1)
         _log.info("เชื่อม broker + subscribe %d device topics (โหลดจากไฟล์ %d ค่า)", len(_subscribed), len(_state))
 
     def on_disconnect(c, u, disconnect_flags, rc, props=None):
@@ -120,6 +124,24 @@ def start() -> None:
 
     def on_message(c, u, msg):
         global _dirty
+        # node status: {base}/nodes/<id>/status → "online"/"offline"
+        m = re.search(r"(?:^|/)nodes/([^/]+)/status$", msg.topic)
+        if m:
+            try:
+                st = msg.payload.decode("utf-8").strip()
+            except Exception:
+                return
+            node_id = m.group(1)
+            if _nodes.get(node_id) != st:
+                _nodes[node_id] = st
+                _log.info("node %s = %s", node_id, st)
+                # ปลุก rule engine — กฎ online:/offline จะได้ทำงานทันที ไม่ต้องรอ tick
+                try:
+                    import events
+                    events.publish(events.Event(type="node", key=node_id, value=st))
+                except Exception as e:
+                    _log.error("publish event ล้มเหลว: %s", e)
+            return
         rel = _rel_topic(msg.topic)
         if rel is None:
             return
@@ -173,6 +195,11 @@ def last_seen(device_topic: str) -> int | None:
     """เวลา (epoch) ที่เห็นค่าอุปกรณ์ล่าสุด — ใช้เช็ค online/offline (None = ไม่เคยเห็น)"""
     e = _state.get(device_topic)
     return e.get("ts") if e else None
+
+
+def node_status(node_id: str) -> str | None:
+    """สถานะ node จาก topic status ของมันเอง — "online"/"offline" (None = ไม่เคยเห็น)"""
+    return _nodes.get(node_id)
 
 
 def stop() -> None:

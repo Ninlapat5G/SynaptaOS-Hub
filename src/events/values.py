@@ -21,6 +21,16 @@ ONLINE_TTL = 300
 _WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
+def _node_of(topic: str) -> str | None:
+    """หา nodeId ของอุปกรณ์จาก kd (topic อุปกรณ์เป็น namespace รวม — หาได้จาก kd ของทุก user)"""
+    import store
+    for uid in store.list_users():
+        for d in store.load_part(uid, "kd") or []:
+            if d.get("topic") == topic and d.get("nodeId"):
+                return d["nodeId"]
+    return None
+
+
 def _to_min(hm: str) -> float:
     """'HH:MM' → จำนวนนาทีตั้งแต่เที่ยงคืน (เทียบเวลาได้ตรงกว่าเทียบ string)"""
     h, m = hm.split(":")
@@ -44,7 +54,16 @@ def get(source: str, user_id: str | None) -> str | None:
         return "true" if phone.get("charging") else "false"
     if source.startswith("online:"):
         import device_state
-        ts = device_state.last_seen(source[len("online:"):])
+        topic = source[len("online:"):]
+        # ทางหลัก: ดูสถานะของ node ที่อุปกรณ์เกาะอยู่ (Node ประกาศ online/offline เอง + LWT)
+        # แม่นกว่าการเดาจากเวลา state เพราะอุปกรณ์ digital ที่ไม่มีใครสั่งจะเงียบเป็นชั่วโมงทั้งที่ออนไลน์
+        node_id = _node_of(topic)
+        if node_id:
+            st = device_state.node_status(node_id)
+            if st is not None:
+                return "online" if st == "online" else "offline"
+        # fallback: อุปกรณ์ที่ไม่รู้ nodeId (เพิ่มเองในแอป/แอปยังไม่ sync nodeId มา) — เดาจากเวลา state เดิม
+        ts = device_state.last_seen(topic)
         if ts is None:
             return "offline"
         return "online" if (time.time() - ts) < ONLINE_TTL else "offline"
