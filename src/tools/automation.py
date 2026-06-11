@@ -129,6 +129,40 @@ def stop() -> None:
     _stop.set()
 
 
+# ── ฟังก์ชันกลาง — MCP tools และหน้า admin ใช้ร่วมกัน ─────────────────────────
+def schedule(task: str, mode: str, value: str, user_id: str = "", name: str = "") -> str:
+    try:
+        nr = _next_run(mode, value)
+    except Exception as e:
+        return f"ตั้งงานไม่ได้: {e}"
+    job = {
+        "id": f"job-{uuid.uuid4().hex[:10]}",   # uuid กัน id ชน (เดิม epoch+len ชนได้ในวินาทีเดียวกัน)
+        "user_id": user_id, "name": name or task[:30], "mode": mode,
+        "value": value, "task": task, "next_run": nr, "enabled": True,
+    }
+    with _lock:
+        _jobs.append(job)
+        _save()
+    when = datetime.fromtimestamp(nr).strftime("%Y-%m-%d %H:%M:%S")
+    repeat = f" (ทำซ้ำทุก {value} วิ)" if mode == "every" else ""
+    return f"ตั้งงาน «{job['name']}» แล้ว จะเริ่ม {when}{repeat} · id={job['id']}"
+
+
+def snapshot(user_id: str = "") -> list[dict]:
+    with _lock:
+        return [dict(j) for j in _jobs if not user_id or j["user_id"] == user_id]
+
+
+def cancel(job_id: str) -> bool:
+    with _lock:
+        before = len(_jobs)
+        _jobs[:] = [j for j in _jobs if j["id"] != job_id]
+        removed = before - len(_jobs)
+        if removed:
+            _save()
+    return bool(removed)
+
+
 # ── MCP tools — ให้ฝั่ง App (hub_agent) สั่งตั้ง/ดู/ยกเลิกงานได้ ────────────────
 def register(mcp):
     @mcp.tool()
@@ -139,40 +173,18 @@ def register(mcp):
         - mode='delay' value=วินาที (อีกกี่วิรันครั้งเดียว) | mode='at' value=เวลา ISO เช่น '2026-06-07T18:30' (รันครั้งเดียว) | mode='every' value=วินาที (ทำซ้ำทุก N วิ)
         - user_id: รหัสแอปเจ้าของงาน (Hub จะรายงานผลกลับให้คนนี้เมื่อทำเสร็จ)
         เมื่อทำเสร็จ Hub จะเด้งแจ้งผลกลับไปที่แอปเจ้าของเองค่ะ"""
-        try:
-            nr = _next_run(mode, value)
-        except Exception as e:
-            return f"ตั้งงานไม่ได้: {e}"
-        job = {
-            "id": f"job-{uuid.uuid4().hex[:10]}",   # uuid กัน id ชน (เดิม epoch+len ชนได้ในวินาทีเดียวกัน)
-            "user_id": user_id, "name": name or task[:30], "mode": mode,
-            "value": value, "task": task, "next_run": nr, "enabled": True,
-        }
-        with _lock:
-            _jobs.append(job)
-            _save()
-        when = datetime.fromtimestamp(nr).strftime("%Y-%m-%d %H:%M:%S")
-        repeat = f" (ทำซ้ำทุก {value} วิ)" if mode == "every" else ""
-        return f"ตั้งงาน «{job['name']}» แล้ว จะเริ่ม {when}{repeat} · id={job['id']}"
+        return schedule(task, mode, value, user_id, name)
 
     @mcp.tool()
     def list_scheduled_tasks(user_id: str = "") -> str:
         """ดูงานอัตโนมัติของ Hub ที่ตั้งไว้ (เว้น user_id ว่าง = ดูทุกคน)"""
-        with _lock:
-            rows = [j for j in _jobs if not user_id or j["user_id"] == user_id]
-            out = []
-            for j in rows:
-                when = datetime.fromtimestamp(j["next_run"]).strftime("%m-%d %H:%M")
-                out.append(f"- {j['name']} [{j['mode']}] รอบหน้า {when} · id={j['id']} · {j['task'][:50]}")
+        out = []
+        for j in snapshot(user_id):
+            when = datetime.fromtimestamp(j["next_run"]).strftime("%m-%d %H:%M")
+            out.append(f"- {j['name']} [{j['mode']}] รอบหน้า {when} · id={j['id']} · {j['task'][:50]}")
         return "\n".join(out) if out else "(ยังไม่มีงานตั้งไว้)"
 
     @mcp.tool()
     def cancel_scheduled_task(job_id: str) -> str:
         """ยกเลิก/ลบงานอัตโนมัติของ Hub ตาม id"""
-        with _lock:
-            before = len(_jobs)
-            _jobs[:] = [j for j in _jobs if j["id"] != job_id]
-            removed = before - len(_jobs)
-            if removed:
-                _save()
-        return "ยกเลิกงานแล้วค่ะ" if removed else f"ไม่พบงาน id={job_id}"
+        return "ยกเลิกงานแล้วค่ะ" if cancel(job_id) else f"ไม่พบงาน id={job_id}"

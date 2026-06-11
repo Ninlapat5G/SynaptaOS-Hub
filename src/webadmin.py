@@ -54,6 +54,26 @@ def broadcast_device_state(topic: str, state: str):
     if loop and loop.is_running():
         asyncio.run_coroutine_threadsafe(do_broadcast(), loop)
 
+def broadcast_event(entry: dict):
+    """เด้งบรรทัดบันทึกเหตุการณ์ (events.log) เข้าหน้า admin แบบสด"""
+    import json
+    payload = json.dumps({"type": "event", "entry": entry}, ensure_ascii=False)
+    loop = main_loop
+    if not loop:
+        return
+
+    async def do_broadcast():
+        for ws in list(active_websockets):
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                if ws in active_websockets:
+                    active_websockets.remove(ws)
+
+    if loop.is_running():
+        asyncio.run_coroutine_threadsafe(do_broadcast(), loop)
+
+
 def mount(app, mcp):
     """ทำการเชื่อมโยงเส้นทางของหน้าเว็บควบคุมเข้ากับ Starlette App"""
 
@@ -372,6 +392,116 @@ def mount(app, mcp):
                     "state": st
                 })
         return JSONResponse(all_devices)
+
+    # ── กฎอัตโนมัติ (event rules ของ Hub) ──────────────────────────────────────
+    @route("/admin/api/rules", methods=["GET"])
+    async def api_list_rules(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from events import engine, rules
+        out = []
+        for r in rules.snapshot():
+            r = dict(r)
+            r["last_fired"] = engine.last_fired(r.get("id", ""))
+            out.append(r)
+        return JSONResponse(out)
+
+    @route("/admin/api/rules", methods=["POST"])
+    async def api_add_rule(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        if not body.get("conditions") or not body.get("actions"):
+            return JSONResponse({"error": "ต้องมี conditions และ actions อย่างน้อยอย่างละ 1"}, status_code=400)
+        import uuid
+        from events import rules
+        rule = {
+            "id": f"rule-{uuid.uuid4().hex[:10]}",
+            "user_id": body.get("user_id", ""),
+            "name": body.get("name", "") or "กฎไม่มีชื่อ",
+            "enabled": True,
+            "logic": (body.get("logic") or "AND").upper(),
+            "conditions": body["conditions"],
+            "actions": body["actions"],
+            "cooldown_sec": int(body.get("cooldown_sec") or 60),
+            "once": bool(body.get("once", False)),
+        }
+        rules.add(rule)
+        return JSONResponse(rule)
+
+    @route("/admin/api/rules/{rid}", methods=["DELETE"])
+    async def api_delete_rule(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from events import rules
+        ok = rules.remove(request.path_params.get("rid", ""))
+        return JSONResponse({"status": "deleted" if ok else "not_found"}, status_code=200 if ok else 404)
+
+    @route("/admin/api/rules/{rid}/toggle", methods=["POST"])
+    async def api_toggle_rule(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from events import rules
+        rid = request.path_params.get("rid", "")
+        enabled = bool(body.get("enabled", True))
+        with rules._lock:
+            found = False
+            for r in rules._rules:
+                if r.get("id") == rid:
+                    r["enabled"] = enabled
+                    found = True
+            if found:
+                rules._save()
+        return JSONResponse({"status": "ok" if found else "not_found"}, status_code=200 if found else 404)
+
+    # ── งานตั้งเวลา (automation jobs ของ Hub) ─────────────────────────────────
+    @route("/admin/api/jobs", methods=["GET"])
+    async def api_list_jobs(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from tools import automation
+        return JSONResponse(automation.snapshot())
+
+    @route("/admin/api/jobs", methods=["POST"])
+    async def api_add_job(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        task = body.get("task", "").strip()
+        mode = body.get("mode", "delay")
+        value = str(body.get("value", "")).strip()
+        if not task or not value:
+            return JSONResponse({"error": "ต้องระบุ task และ value"}, status_code=400)
+        from tools import automation
+        msg = automation.schedule(task, mode, value, body.get("user_id", ""), body.get("name", ""))
+        ok = not msg.startswith("ตั้งงานไม่ได้")
+        return JSONResponse({"status": "ok" if ok else "error", "message": msg}, status_code=200 if ok else 400)
+
+    @route("/admin/api/jobs/{jid}", methods=["DELETE"])
+    async def api_delete_job(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from tools import automation
+        ok = automation.cancel(request.path_params.get("jid", ""))
+        return JSONResponse({"status": "deleted" if ok else "not_found"}, status_code=200 if ok else 404)
+
+    # ── feed เหตุการณ์ (event-driven activity) ────────────────────────────────
+    @route("/admin/api/events", methods=["GET"])
+    async def api_list_events(request):
+        if not verify_token(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        from events import log as evlog
+        return JSONResponse(evlog.snapshot())
 
     # 9. Real-time WebSockets
     from starlette.websockets import WebSocket, WebSocketDisconnect

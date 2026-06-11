@@ -32,7 +32,8 @@ _rules: list[dict] = []
 def load() -> None:
     global _rules
     try:
-        _rules = json.loads(_FILE.read_text(encoding="utf-8"))
+        # utf-8-sig: เผื่อไฟล์ถูกเปิด/เซฟด้วย Notepad ที่แถม BOM มาให้ — utf-8 เพียวจะ parse ไม่ผ่านเงียบ ๆ
+        _rules = json.loads(_FILE.read_text(encoding="utf-8-sig"))
     except Exception:
         _rules = []
 

@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 
-from . import actions, bus, rules, values
+from . import actions, bus, log, rules, values
 
 _log = logging.getLogger("events.engine")
 
@@ -38,9 +38,12 @@ def _fire(rule: dict) -> None:
     uid = rule.get("user_id") or None
     for action in rule.get("actions", []):
         try:
-            _log.info("[rule:%s] %s → %s", name, action.get("kind"), actions.run(action, uid))
+            result = actions.run(action, uid)
+            _log.info("[rule:%s] %s → %s", name, action.get("kind"), result)
+            log.add("rule", f"กฎ «{name}» ยิง: {action.get('kind')}", str(result)[:120])
         except Exception as e:
             _log.error("[rule:%s] action ล้มเหลว: %s", name, e)
+            log.add("rule", f"กฎ «{name}» action ล้มเหลว", str(e)[:120])
     if rule.get("once"):
         rules.disable(rule.get("id", ""))
 
@@ -84,6 +87,11 @@ def _loop() -> None:
             _evaluate_all()
         except Exception as e:
             _log.error("ประเมินกฎผิดพลาด: %s", e)
+
+
+def last_fired(rule_id: str) -> float | None:
+    """เวลายิงล่าสุดของกฎ (epoch) — หน้า admin ใช้โชว์ (None = ยังไม่เคยยิงรอบนี้)"""
+    return _last_fire.get(rule_id)
 
 
 def start() -> None:

@@ -9,7 +9,7 @@ events — ระบบ event-driven ของ Hub (ชั้น A: ระบบ
 ดู docs/plan_events.md สำหรับภาพรวมสถาปัตยกรรม
 """
 from .event import Event
-from . import bus, engine, rules
+from . import bus, engine, log, rules
 
 
 def publish(event: Event) -> None:
@@ -17,6 +17,7 @@ def publish(event: Event) -> None:
 
 
 def start() -> None:
+    log.start()     # บันทึก feed เหตุการณ์ให้หน้า admin (เก็บในแรม)
     engine.start()
 
 

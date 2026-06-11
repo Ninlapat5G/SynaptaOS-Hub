@@ -44,6 +44,9 @@ const ICONS = {
   send: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z',
   location: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z',
   devices: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 9h-8V5h8v6z',
+  bolt: 'M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z',
+  clock: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z',
+  pulse: 'M3 13h2.79l2.46-7.39c.18-.55.96-.52 1.1.04l3.1 12.42 2.18-5.45c.15-.38.52-.62.93-.62H21v2h-4.76l-3.31 8.27c-.21.53-.98.49-1.12-.06L8.74 10.3l-1.29 3.86c-.14.41-.52.69-.95.69H3v-1.85z',
 };
 
 // ── ชิ้นส่วน UI ที่ใช้ซ้ำ ───────────────────────────────────────────────────
@@ -131,6 +134,9 @@ function HubOffline() {
 const TABS = [
   { id: 'users', label: 'ผู้ใช้งาน', icon: ICONS.users },
   { id: 'devices', label: 'อุปกรณ์ IoT', icon: ICONS.devices },
+  { id: 'rules', label: 'กฎอัตโนมัติ', icon: ICONS.bolt },
+  { id: 'jobs', label: 'งานตั้งเวลา', icon: ICONS.clock },
+  { id: 'events', label: 'เหตุการณ์', icon: ICONS.pulse },
   { id: 'location', label: 'ตำแหน่ง', icon: ICONS.location },
   { id: 'agent', label: 'เอเจนต์', icon: ICONS.agent },
   { id: 'system', label: 'ระบบหลังบ้าน', icon: ICONS.system },
@@ -1666,6 +1672,354 @@ function LocationTab({ users, liveUpdate, activeTab }) {
 }
 
 // ── แอปหลัก ─────────────────────────────────────────────────────────────────
+// ── แท็บ: กฎอัตโนมัติ (event rules บน Hub) ──────────────────────────────────
+const SPECIAL_SOURCES = [
+  { v: '__time__', label: '⏰ เวลา (HH:MM)' },
+  { v: '__weekday__', label: '📅 วัน (mon,tue,..)' },
+  { v: '__battery__', label: '🔋 แบตมือถือ (%)' },
+  { v: '__charging__', label: '⚡ กำลังชาร์จ (true/false)' },
+];
+const OPS = ['>', '<', '>=', '<=', '==', '!='];
+
+function condText(c, devs) {
+  const d = (devs || []).find((x) => x.topic === c.source || 'online:' + x.topic === c.source);
+  const name = c.source.startsWith('online:') ? `${d ? d.name : c.source.slice(7)} ออนไลน์?`
+    : c.source === '__time__' ? 'เวลา' : c.source === '__weekday__' ? 'วัน'
+    : c.source === '__battery__' ? 'แบตมือถือ' : c.source === '__charging__' ? 'กำลังชาร์จ'
+    : (d ? d.name : c.source);
+  return `${name} ${c.op} ${c.value}`;
+}
+
+function actText(a, devs) {
+  if (a.kind === 'device') {
+    const d = (devs || []).find((x) => x.topic === a.topic);
+    return `สั่ง ${d ? d.name : a.topic} = ${a.value}`;
+  }
+  if (a.kind === 'notify') return `แจ้งเตือน: "${(a.text || '').slice(0, 50)}"`;
+  if (a.kind === 'agent') return `ให้สมองทำ: "${(a.task || '').slice(0, 50)}"`;
+  if (a.kind === 'scene') return `เปิด scene ${a.scene_id}`;
+  return a.kind;
+}
+
+function RuleForm({ devs, users, onSaved, onCancel }) {
+  const [name, setName] = useState('');
+  const [logic, setLogic] = useState('AND');
+  const [cooldown, setCooldown] = useState(60);
+  const [once, setOnce] = useState(false);
+  const [userId, setUserId] = useState('');
+  const [conds, setConds] = useState([{ source: '', op: '>', value: '' }]);
+  const [acts, setActs] = useState([{ kind: 'device', topic: '', value: 'true', text: '', task: '' }]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const setCond = (i, k, v) => setConds(conds.map((c, j) => (j === i ? { ...c, [k]: v } : c)));
+  const setAct = (i, k, v) => setActs(acts.map((a, j) => (j === i ? { ...a, [k]: v } : a)));
+
+  const save = async () => {
+    setErr('');
+    const conditions = conds.filter((c) => c.source && c.value !== '');
+    if (!conditions.length) { setErr('ต้องมีเงื่อนไขอย่างน้อย 1 ข้อ'); return; }
+    const actions = acts.map((a) => {
+      if (a.kind === 'device') return a.topic ? { kind: 'device', topic: a.topic, value: a.value } : null;
+      if (a.kind === 'notify') return a.text ? { kind: 'notify', text: a.text } : null;
+      if (a.kind === 'agent') return a.task ? { kind: 'agent', task: a.task } : null;
+      return null;
+    }).filter(Boolean);
+    if (!actions.length) { setErr('ต้องมี action อย่างน้อย 1 อย่าง'); return; }
+    setSaving(true);
+    try {
+      await api('/admin/api/rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, logic, conditions, actions, cooldown_sec: cooldown, once, user_id: userId }),
+      });
+      onSaved();
+    } catch (e) { setErr(e.message); }
+    setSaving(false);
+  };
+
+  const inputCls = 'bg-bg1/70 border border-line rounded-lg px-2.5 py-1.5 text-sm focus:border-accent outline-none';
+  return (
+    <Card className="p-5 border border-accent/30">
+      <h3 className="font-semibold mb-4">สร้างกฎใหม่</h3>
+      <div className="flex flex-wrap gap-3 mb-4 items-center">
+        <input className={inputCls + ' flex-1 min-w-[200px]'} placeholder="ชื่อกฎ เช่น ร้อนเกินเปิดพัดลม" value={name} onChange={(e) => setName(e.target.value)} />
+        <select className={inputCls} value={userId} onChange={(e) => setUserId(e.target.value)}>
+          <option value="">เจ้าของกฎ (สำหรับแจ้งเตือน)</option>
+          {Object.entries(users || {}).map(([uid, u]) => <option key={uid} value={uid}>{(u && u.app_name) || uid}</option>)}
+        </select>
+      </div>
+
+      <div className="text-xs text-inkDim mb-1.5">เงื่อนไข (ครบตามนี้แล้วกฎจะยิง)</div>
+      {conds.map((c, i) => (
+        <div key={i} className="flex flex-wrap gap-2 mb-2 items-center">
+          <select className={inputCls + ' min-w-[180px]'} value={c.source} onChange={(e) => setCond(i, 'source', e.target.value)}>
+            <option value="">— เลือกแหล่งเงื่อนไข —</option>
+            <optgroup label="อุปกรณ์ (ค่าปัจจุบัน)">
+              {(devs || []).map((d) => <option key={d.topic} value={d.topic}>{d.name} ({d.type})</option>)}
+            </optgroup>
+            <optgroup label="อุปกรณ์ออนไลน์/ออฟไลน์">
+              {(devs || []).map((d) => <option key={'o' + d.topic} value={'online:' + d.topic}>{d.name} ออนไลน์?</option>)}
+            </optgroup>
+            <optgroup label="ค่าระบบ">
+              {SPECIAL_SOURCES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+            </optgroup>
+          </select>
+          <select className={inputCls} value={c.op} onChange={(e) => setCond(i, 'op', e.target.value)}>
+            {OPS.map((o) => <option key={o}>{o}</option>)}
+          </select>
+          <input className={inputCls + ' w-36'} placeholder="ค่า เช่น 30 / online" value={c.value} onChange={(e) => setCond(i, 'value', e.target.value)} />
+          {conds.length > 1 && <button className="text-danger text-sm px-1" onClick={() => setConds(conds.filter((_, j) => j !== i))}>✕</button>}
+        </div>
+      ))}
+      <div className="flex gap-3 items-center mb-4">
+        <button className="text-xs text-accent hover:underline" onClick={() => setConds([...conds, { source: '', op: '>', value: '' }])}>+ เพิ่มเงื่อนไข</button>
+        {conds.length > 1 && (
+          <select className={inputCls + ' text-xs'} value={logic} onChange={(e) => setLogic(e.target.value)}>
+            <option value="AND">ต้องจริงทุกข้อ (AND)</option>
+            <option value="OR">จริงข้อใดข้อหนึ่ง (OR)</option>
+          </select>
+        )}
+      </div>
+
+      <div className="text-xs text-inkDim mb-1.5">สิ่งที่จะทำ</div>
+      {acts.map((a, i) => (
+        <div key={i} className="flex flex-wrap gap-2 mb-2 items-center">
+          <select className={inputCls} value={a.kind} onChange={(e) => setAct(i, 'kind', e.target.value)}>
+            <option value="device">สั่งอุปกรณ์</option>
+            <option value="notify">แจ้งเตือนเข้ามือถือ</option>
+            <option value="agent">ให้สมอง (AI) ทำ</option>
+          </select>
+          {a.kind === 'device' && (
+            <React.Fragment>
+              <select className={inputCls + ' min-w-[160px]'} value={a.topic} onChange={(e) => setAct(i, 'topic', e.target.value)}>
+                <option value="">— เลือกอุปกรณ์ —</option>
+                {(devs || []).filter((d) => d.type !== 'sensor').map((d) => <option key={d.topic} value={d.topic}>{d.name}</option>)}
+              </select>
+              <input className={inputCls + ' w-28'} placeholder="true/false/0-255" value={a.value} onChange={(e) => setAct(i, 'value', e.target.value)} />
+            </React.Fragment>
+          )}
+          {a.kind === 'notify' && <input className={inputCls + ' flex-1 min-w-[220px]'} placeholder="ข้อความแจ้งเตือน" value={a.text} onChange={(e) => setAct(i, 'text', e.target.value)} />}
+          {a.kind === 'agent' && <input className={inputCls + ' flex-1 min-w-[220px]'} placeholder="งานที่ให้ AI ทำ เช่น สรุปสถานะบ้านแล้วแจ้งเจ้าของ" value={a.task} onChange={(e) => setAct(i, 'task', e.target.value)} />}
+          {acts.length > 1 && <button className="text-danger text-sm px-1" onClick={() => setActs(acts.filter((_, j) => j !== i))}>✕</button>}
+        </div>
+      ))}
+      <button className="text-xs text-accent hover:underline mb-4" onClick={() => setActs([...acts, { kind: 'device', topic: '', value: 'true', text: '', task: '' }])}>+ เพิ่ม action</button>
+
+      <div className="flex flex-wrap gap-3 items-center border-t border-line pt-4">
+        <label className="text-xs text-inkDim flex items-center gap-2">กันยิงรัว (วินาที)
+          <input type="number" className={inputCls + ' w-20'} value={cooldown} onChange={(e) => setCooldown(parseInt(e.target.value) || 0)} />
+        </label>
+        <label className="text-xs text-inkDim flex items-center gap-1.5">
+          <input type="checkbox" checked={once} onChange={(e) => setOnce(e.target.checked)} /> ยิงครั้งเดียวแล้วปิดกฎ
+        </label>
+        <div className="ml-auto flex gap-2">
+          <button onClick={onCancel} className="px-4 py-2 rounded-xl2 text-sm text-inkDim hover:text-ink border border-line">ยกเลิก</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 rounded-xl2 text-sm font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-50">
+            {saving ? 'กำลังบันทึก...' : 'บันทึกกฎ'}
+          </button>
+        </div>
+      </div>
+      {err && <div className="text-danger text-sm mt-2">{err}</div>}
+    </Card>
+  );
+}
+
+function RulesTab({ users }) {
+  const [rules, setRules] = useState(null);
+  const [devs, setDevs] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    setErr('');
+    try {
+      const [r, d] = await Promise.all([api('/admin/api/rules'), api('/admin/api/devices')]);
+      setRules(r); setDevs(d);
+    } catch (e) { if (e.message !== 'unauthorized') setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = async (r) => {
+    await api(`/admin/api/rules/${r.id}/toggle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !r.enabled }) });
+    load();
+  };
+  const del = async (r) => {
+    if (!confirm(`ลบกฎ «${r.name}» ?`)) return;
+    await api(`/admin/api/rules/${r.id}`, { method: 'DELETE' });
+    load();
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-lg">กฎอัตโนมัติของ Hub <span className="text-inkDim text-sm font-normal">· ทำงานตลอด 24 ชม. แม้มือถือปิด</span></h2>
+        <div className="flex gap-2">
+          <button onClick={load} className="w-9 h-9 flex items-center justify-center rounded-lg text-inkDim hover:text-accent hover:bg-white/5"><Icon path={ICONS.refresh} className="w-4 h-4" /></button>
+          <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 rounded-xl2 text-sm font-medium bg-accent/15 text-accent hover:bg-accent/25">{showForm ? 'ปิดฟอร์ม' : '+ สร้างกฎ'}</button>
+        </div>
+      </div>
+
+      {showForm && <RuleForm devs={devs} users={users} onSaved={() => { setShowForm(false); load(); }} onCancel={() => setShowForm(false)} />}
+
+      {err ? <Spinner text={'โหลดล้มเหลว: ' + err} danger /> : rules === null ? <Spinner />
+        : rules.length === 0 ? <Card className="p-8 text-center text-inkDim text-sm">ยังไม่มีกฎ — กด "+ สร้างกฎ" หรือสั่งซินจากมือถือ เช่น "ถ้าอุณหภูมิเกิน 30 เปิดพัดลม"</Card>
+        : rules.map((r) => (
+          <Card key={r.id} className={'p-4 ' + (r.enabled ? '' : 'opacity-50')}>
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={() => toggle(r)} title={r.enabled ? 'กดเพื่อปิด' : 'กดเพื่อเปิด'}
+                className={'w-10 h-6 rounded-full relative transition ' + (r.enabled ? 'bg-ok/70' : 'bg-inkXdim/40')}>
+                <span className={'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ' + (r.enabled ? 'left-[18px]' : 'left-0.5')} />
+              </button>
+              <div className="flex-1 min-w-[220px]">
+                <div className="font-medium">{r.name} {r.once && <Badge color="accent2">ครั้งเดียว</Badge>}</div>
+                <div className="text-sm text-inkDim mt-0.5">
+                  ถ้า {(r.conditions || []).map((c) => condText(c, devs)).join(r.logic === 'OR' ? ' หรือ ' : ' และ ')}
+                  <span className="text-accent"> → </span>
+                  {(r.actions || []).map((a) => actText(a, devs)).join(' · ')}
+                </div>
+              </div>
+              <div className="text-xs text-inkXdim text-right">
+                <div>กันยิงรัว {r.cooldown_sec || 0} วิ</div>
+                <div>{r.last_fired ? 'ยิงล่าสุด ' + thDate(r.last_fired) : 'ยังไม่เคยยิง'}</div>
+              </div>
+              <button onClick={() => del(r)} className="text-danger/70 hover:text-danger text-sm px-2">ลบ</button>
+            </div>
+          </Card>
+        ))}
+    </div>
+  );
+}
+
+// ── แท็บ: งานตั้งเวลา (automation jobs ของ Hub) ─────────────────────────────
+function JobsTab({ users }) {
+  const [jobs, setJobs] = useState(null);
+  const [err, setErr] = useState('');
+  const [task, setTask] = useState('');
+  const [mode, setMode] = useState('delay');
+  const [value, setValue] = useState('');
+  const [userId, setUserId] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const load = useCallback(async () => {
+    setErr('');
+    try { setJobs(await api('/admin/api/jobs')); }
+    catch (e) { if (e.message !== 'unauthorized') setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+
+  const add = async () => {
+    setMsg('');
+    try {
+      const r = await api('/admin/api/jobs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, mode, value, user_id: userId }),
+      });
+      setMsg(r.message); setTask(''); setValue(''); load();
+    } catch (e) { setMsg(e.message); }
+  };
+  const del = async (j) => {
+    if (!confirm(`ยกเลิกงาน «${j.name}» ?`)) return;
+    await api(`/admin/api/jobs/${j.id}`, { method: 'DELETE' });
+    load();
+  };
+
+  const inputCls = 'bg-bg1/70 border border-line rounded-lg px-2.5 py-1.5 text-sm focus:border-accent outline-none';
+  const modeHint = mode === 'at' ? 'เวลา ISO เช่น 2026-06-12T18:30' : 'วินาที เช่น 3600';
+  return (
+    <div className="flex flex-col gap-4">
+      <h2 className="font-semibold text-lg">งานตั้งเวลาของ Hub <span className="text-inkDim text-sm font-normal">· สมอง (AI) ลงมือทำตามกำหนด แล้วรายงานผลเข้ามือถือ</span></h2>
+
+      <Card className="p-5">
+        <div className="flex flex-wrap gap-2 items-center">
+          <input className={inputCls + ' flex-1 min-w-[260px]'} placeholder='งานที่ให้ทำ เช่น "สรุปพื้นที่ disk ที่เหลือ แล้วแจ้งผล"' value={task} onChange={(e) => setTask(e.target.value)} />
+          <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="delay">อีก N วินาที (ครั้งเดียว)</option>
+            <option value="at">เวลาที่กำหนด (ครั้งเดียว)</option>
+            <option value="every">ทำซ้ำทุก N วินาที</option>
+          </select>
+          <input className={inputCls + ' w-52'} placeholder={modeHint} value={value} onChange={(e) => setValue(e.target.value)} />
+          <select className={inputCls} value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">รายงานผลให้ใคร (ไม่บังคับ)</option>
+            {Object.entries(users || {}).map(([uid, u]) => <option key={uid} value={uid}>{(u && u.app_name) || uid}</option>)}
+          </select>
+          <button onClick={add} className="px-4 py-2 rounded-xl2 text-sm font-medium bg-accent/15 text-accent hover:bg-accent/25">ตั้งงาน</button>
+        </div>
+        {msg && <div className="text-sm text-inkDim mt-2">{msg}</div>}
+      </Card>
+
+      {err ? <Spinner text={'โหลดล้มเหลว: ' + err} danger /> : jobs === null ? <Spinner />
+        : jobs.length === 0 ? <Card className="p-8 text-center text-inkDim text-sm">ยังไม่มีงานตั้งไว้</Card>
+        : jobs.map((j) => (
+          <Card key={j.id} className="p-4 flex flex-wrap items-center gap-3">
+            <Badge color={j.mode === 'every' ? 'accent2' : 'accent'}>{j.mode === 'every' ? 'ทำซ้ำ' : 'ครั้งเดียว'}</Badge>
+            <div className="flex-1 min-w-[220px]">
+              <div className="font-medium">{j.name}</div>
+              <div className="text-sm text-inkDim">{j.task}</div>
+            </div>
+            <div className="text-xs text-inkXdim text-right">
+              <div>รอบถัดไป {thDate(j.next_run)}</div>
+              {j.user_id && <div>รายงานให้ {j.user_id}</div>}
+            </div>
+            <button onClick={() => del(j)} className="text-danger/70 hover:text-danger text-sm px-2">ยกเลิก</button>
+          </Card>
+        ))}
+    </div>
+  );
+}
+
+// ── แท็บ: เหตุการณ์ (feed สดจากระบบ event-driven) ───────────────────────────
+const EV_BADGE = { device: 'accent', node: 'accent2', phone: 'ok', rule: 'accent', job: 'dim' };
+const EV_LABEL = { device: 'อุปกรณ์', node: 'บอร์ด', phone: 'มือถือ', rule: 'กฎยิง', job: 'งาน' };
+
+function EventsTab() {
+  const [items, setItems] = useState(null);
+  const [err, setErr] = useState('');
+  const [filter, setFilter] = useState('');
+
+  const load = useCallback(async () => {
+    setErr('');
+    try { setItems((await api('/admin/api/events')).reverse()); }
+    catch (e) { if (e.message !== 'unauthorized') setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // รับ event สดจาก websocket (App แปลงมาเป็น CustomEvent ให้)
+  useEffect(() => {
+    const h = (ev) => setItems((prev) => [ev.detail, ...(prev || [])].slice(0, 300));
+    window.addEventListener('syn-event', h);
+    return () => window.removeEventListener('syn-event', h);
+  }, []);
+
+  const shown = (items || []).filter((it) => !filter || it.kind === filter);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="font-semibold text-lg">เหตุการณ์ในระบบ <span className="text-inkDim text-sm font-normal">· สด — อุปกรณ์เปลี่ยนค่า/บอร์ดเข้าออก/กฎยิง</span></h2>
+        <div className="flex gap-1.5">
+          {['', 'device', 'node', 'rule', 'phone'].map((k) => (
+            <button key={k} onClick={() => setFilter(k)}
+              className={'px-3 py-1.5 rounded-lg text-xs ' + (filter === k ? 'bg-accent/15 text-accent' : 'text-inkDim hover:bg-white/5')}>
+              {k === '' ? 'ทั้งหมด' : EV_LABEL[k]}
+            </button>
+          ))}
+        </div>
+      </div>
+      {err ? <Spinner text={'โหลดล้มเหลว: ' + err} danger /> : items === null ? <Spinner />
+        : shown.length === 0 ? <Card className="p-8 text-center text-inkDim text-sm">ยังไม่มีเหตุการณ์ (เก็บเฉพาะตั้งแต่ Hub เปิดรอบนี้)</Card>
+        : <Card className="p-2 divide-y divide-line/50 max-h-[75vh] overflow-y-auto">
+          {shown.map((it, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2 text-sm">
+              <span className="text-xs text-inkXdim font-mono w-36 shrink-0">{thDate(it.ts)}</span>
+              <Badge color={EV_BADGE[it.kind] || 'dim'}>{EV_LABEL[it.kind] || it.kind}</Badge>
+              <span className="flex-1">{it.text}</span>
+              {it.detail && <span className="text-xs text-inkXdim truncate max-w-[280px]">{it.detail}</span>}
+            </div>
+          ))}
+        </Card>}
+    </div>
+  );
+}
+
 function App() {
   const [ready, setReady] = useState(false);     // ตรวจสิทธิ์เสร็จแล้ว
   const [needLogin, setNeedLogin] = useState(false);
@@ -1706,6 +2060,8 @@ function App() {
           setLiveUpdate({ user_id: m.user_id, kind: m.kind, data: m.data, ts: Date.now() });
         } else if (m.type === 'device_update') {
           window.dispatchEvent(new CustomEvent('syn-device-update', { detail: { topic: m.topic, state: m.state } }));
+        } else if (m.type === 'event') {
+          window.dispatchEvent(new CustomEvent('syn-event', { detail: m.entry }));
         }
       } catch (_) {}
     };
@@ -1763,6 +2119,21 @@ function App() {
         <div style={{ display: tab === 'devices' ? '' : 'none' }}>
           <motion.div animate={tab === 'devices' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
             <DevicesTab />
+          </motion.div>
+        </div>
+        <div style={{ display: tab === 'rules' ? '' : 'none' }}>
+          <motion.div animate={tab === 'rules' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <RulesTab users={users} />
+          </motion.div>
+        </div>
+        <div style={{ display: tab === 'jobs' ? '' : 'none' }}>
+          <motion.div animate={tab === 'jobs' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <JobsTab users={users} />
+          </motion.div>
+        </div>
+        <div style={{ display: tab === 'events' ? '' : 'none' }}>
+          <motion.div animate={tab === 'events' ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.99 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
+            <EventsTab />
           </motion.div>
         </div>
         <div style={{ display: tab === 'location' ? '' : 'none' }}>
