@@ -22,6 +22,7 @@ _log = logging.getLogger("discovery")
 _client: mqtt.Client | None = None
 _stop = threading.Event()
 _started_at = 0  # epoch ตอน Hub เริ่มรอบนี้ — App เห็นค่าเปลี่ยน = Hub restart → ดึง tools ใหม่
+_zeroconf = None  # ตัวประกาศชื่อ mDNS — เก็บไว้ไม่ให้โดน GC ระหว่างรัน
 
 # republish online ทุกกี่วิ — สั้นกว่า keepalive (30) เพื่อให้สถานะใน broker สดเสมอ
 # และถ้า LWT เคยเด้ง offline ไว้ heartbeat ตัวถัดไปจะ republish online ทับให้ทันที
@@ -65,12 +66,49 @@ def _status_payload(status: str, host: str) -> str:
     return json.dumps({"status": status, "host": host, "port": config.MCP_PORT, "started_at": _started_at})
 
 
+def _lan_ip() -> str:
+    """IP ฝั่ง LAN (interface ที่เป็นเส้นทางออกเน็ต) — สำหรับให้บอร์ดในวง LAN หาเจอ"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+def _register_mdns() -> None:
+    """ประกาศชื่อ synapta-hub.local → IP ปัจจุบันของเครื่องนี้ (mDNS)
+
+    บอร์ด ESP32 ตั้ง broker เป็นชื่อนี้แทน IP — DHCP แจกเลขใหม่ก็ยังหาเจอ
+    บน Raspberry Pi โค้ดเดิมนี้ใช้ได้เลย (หรือจะพึ่ง Avahi ของระบบก็ได้)
+    """
+    global _zeroconf
+    try:
+        from zeroconf import Zeroconf, ServiceInfo
+        ip = _lan_ip()
+        info = ServiceInfo(
+            "_mqtt._tcp.local.",
+            "SynaptaOS Hub._mqtt._tcp.local.",
+            addresses=[socket.inet_aton(ip)],
+            port=config.MQTT_PORT,
+            server="synapta-hub.local.",
+        )
+        _zeroconf = Zeroconf()
+        _zeroconf.register_service(info)
+        _log.info("mDNS: ประกาศ synapta-hub.local → %s:%s", ip, config.MQTT_PORT)
+    except Exception as e:
+        _log.warning("mDNS ลงทะเบียนไม่ได้ (บอร์ดต้องใช้ IP ตรง ๆ แทน): %s", e)
+
+
 def start() -> None:
     """connect broker, ตั้ง LWT offline, publish retained online + endpoint"""
     global _client, _started_at
     _started_at = int(time.time())
     host = tailscale_ip()
     status_topic = config.topic(f"hub/{config.AGENT_NAME}/status")
+    _register_mdns()   # ให้บอร์ดหา broker เจอด้วยชื่อ synapta-hub.local (กัน DHCP ย้าย IP)
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 
@@ -110,6 +148,11 @@ def start() -> None:
 
 def stop() -> None:
     _stop.set()
+    if _zeroconf:
+        try:
+            _zeroconf.close()
+        except Exception:
+            pass
     if _client:
         host = tailscale_ip()
         status_topic = config.topic(f"hub/{config.AGENT_NAME}/status")

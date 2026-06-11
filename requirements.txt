@@ -10,3 +10,4 @@ python-dotenv>=1.0.0
 requests>=2.32.0
 firebase-admin>=6.5.0
 tzdata>=2024.1  # timezone database — จำเป็นบน Windows (ZoneInfo Asia/Bangkok ใน system_info)
+zeroconf>=0.140  # mDNS — ประกาศชื่อ synapta-hub.local ให้บอร์ดหา broker เจอแม้ DHCP ย้าย IP

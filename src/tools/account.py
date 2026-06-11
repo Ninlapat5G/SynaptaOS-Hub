@@ -94,6 +94,7 @@ def send_app_command(user_id: str, command: str, command_type: str, sender: str 
         "user_id": user_id,   # ให้ App แนบกลับมาตอนตอบ ACK เพื่อยืนยันว่าตอบ "คำสั่งนี้" ของ "user นี้" จริง
         "sender": sender,
         "type": command_type,
+        "ts": int(time.time()),  # เวลาเกิดเหตุ — แอปใช้เช็คว่าข้อความค้างมานานแค่ไหน (กันเล่าเรื่องเก่าเป็นปัจจุบัน)
         ("text" if command_type == "chat" else "action_prompt"): command,
     })
     if not sent:
