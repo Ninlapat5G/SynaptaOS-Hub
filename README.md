@@ -126,4 +126,4 @@ GUI ขึ้นมาให้กรอก settings → กด Build → ได
 
 ## License
 
-GPL v3
+Copyright (c) 2026 Ninlapat5G. All Rights Reserved. เปิดให้ดูโค้ดเท่านั้น ไม่ใช่ open source ห้ามนำไปใช้ ดัดแปลง หรือแจกจ่ายต่อโดยไม่ได้รับอนุญาตเป็นลายลักษณ์อักษร ดู [LICENSE](LICENSE)
